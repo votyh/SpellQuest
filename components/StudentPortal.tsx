@@ -186,7 +186,7 @@ const StudentPortal: React.FC<Props> = ({ student, onSelectModule, onLogout }) =
             {MODULES.map((module, index) => {
                 const progress = student.progress[module.id];
                 const prevModule = index > 0 ? MODULES[index - 1] : null;
-                const prevProgress = prevModule ? student.progress[prevModule.id] : undefined;
+                const prevProgress = prevModule ? (student.progress[prevModule.id] as ModuleProgress | undefined) : undefined;
                 // Lock if previous not completed (except for first one)
                 // Using explicit check for completed property presence to avoid TS unknown type errors
                 const isLocked = index > 0 && !prevProgress?.completed;

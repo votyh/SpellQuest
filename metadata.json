@@ -1,0 +1,5 @@
+{
+  "name": "SpellQuest NZ",
+  "description": "A gamified, NZC-aligned spelling adventure for New Zealand classrooms using Gemini AI for dynamic content generation.",
+  "requestFramePermissions": []
+}

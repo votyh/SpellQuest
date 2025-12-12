@@ -188,7 +188,8 @@ const StudentPortal: React.FC<Props> = ({ student, onSelectModule, onLogout }) =
                 const prevModule = index > 0 ? MODULES[index - 1] : null;
                 const prevProgress = prevModule ? student.progress[prevModule.id] : undefined;
                 // Lock if previous not completed (except for first one)
-                const isLocked = index > 0 && !(prevProgress as ModuleProgress | undefined)?.completed;
+                // Using explicit check for completed property presence to avoid TS unknown type errors
+                const isLocked = index > 0 && !prevProgress?.completed;
                 const styles = getThemeStyles(module.theme);
 
                 return (

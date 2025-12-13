@@ -1,10 +1,11 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { UserRole, Student, Teacher, LearningModule } from './types';
-import { getStudents, MODULES, authenticateStudent, updateStudent, loginTeacher, registerTeacher } from './services/mockStore';
+import { getStudents, getTeachers, MODULES, authenticateStudent, updateStudent, loginTeacher, registerTeacher, saveSession, clearSession, getSession } from './services/mockStore';
 import StudentPortal from './components/StudentPortal';
 import TeacherDashboard from './components/TeacherDashboard';
 import ActivityView from './components/ActivityView';
-import { Users, GraduationCap, ArrowRight, Sparkles, BookOpen, ShieldCheck, ArrowLeft, Mail, Lock, User } from 'lucide-react';
+import PlacementTestView from './components/PlacementTestView'; // Import the new view
+import { Users, GraduationCap, ArrowRight, Sparkles, BookOpen, ShieldCheck, ArrowLeft, Mail, Lock, User, School } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 const App: React.FC = () => {
@@ -12,6 +13,7 @@ const App: React.FC = () => {
   const [currentStudent, setCurrentStudent] = useState<Student | null>(null);
   const [currentTeacher, setCurrentTeacher] = useState<Teacher | null>(null);
   const [activeModule, setActiveModule] = useState<LearningModule | null>(null);
+  const [isTakingPlacementTest, setIsTakingPlacementTest] = useState(false); // State for placement test
   
   // Student Login State
   const [loginCode, setLoginCode] = useState('');
@@ -23,7 +25,33 @@ const App: React.FC = () => {
   const [teacherEmail, setTeacherEmail] = useState('');
   const [teacherPassword, setTeacherPassword] = useState('');
   const [teacherName, setTeacherName] = useState('');
+  const [className, setClassName] = useState('');
   const [teacherAuthError, setTeacherAuthError] = useState('');
+
+  // Restore Session on Mount
+  useEffect(() => {
+    const session = getSession();
+    if (session) {
+        if (session.role === UserRole.STUDENT) {
+            const students = getStudents();
+            const student = students.find(s => s.id === session.id);
+            if (student) {
+                // Ensure streak is updated if it's a new day
+                updateStudent(student);
+                const updated = getStudents().find(s => s.id === student.id);
+                setCurrentStudent(updated || student);
+                setRole(UserRole.STUDENT);
+            }
+        } else if (session.role === UserRole.TEACHER) {
+            const teachers = getTeachers();
+            const teacher = teachers.find(t => t.id === session.id);
+            if (teacher) {
+                setCurrentTeacher(teacher);
+                setRole(UserRole.TEACHER);
+            }
+        }
+    }
+  }, []);
 
   const handleStudentLogin = () => {
     const student = authenticateStudent(loginCode);
@@ -32,6 +60,7 @@ const App: React.FC = () => {
         const updated = getStudents().find(s => s.id === student.id);
         setCurrentStudent(updated || student);
         setRole(UserRole.STUDENT);
+        saveSession(UserRole.STUDENT, student.id);
         setLoginCode('');
         setLoginError('');
     } else {
@@ -51,10 +80,15 @@ const App: React.FC = () => {
               setTeacherAuthError('Please provide your name.');
               return;
           }
-          const newTeacher = registerTeacher(teacherName, teacherEmail, teacherPassword);
+          if (!className) {
+              setTeacherAuthError('Please provide a class name.');
+              return;
+          }
+          const newTeacher = registerTeacher(teacherName, teacherEmail, teacherPassword, className);
           if (newTeacher) {
               setCurrentTeacher(newTeacher);
               setRole(UserRole.TEACHER);
+              saveSession(UserRole.TEACHER, newTeacher.id);
               setShowTeacherAuth(false);
           } else {
               setTeacherAuthError('Email already registered.');
@@ -65,6 +99,7 @@ const App: React.FC = () => {
           if (teacher) {
               setCurrentTeacher(teacher);
               setRole(UserRole.TEACHER);
+              saveSession(UserRole.TEACHER, teacher.id);
               setShowTeacherAuth(false);
           } else {
               setTeacherAuthError('Invalid email or password.');
@@ -85,15 +120,35 @@ const App: React.FC = () => {
     setActiveModule(null);
   };
 
+  const handlePlacementComplete = () => {
+      setIsTakingPlacementTest(false);
+      // Refresh student data
+      if (currentStudent) {
+          const updated = getStudents().find(s => s.id === currentStudent.id);
+          if (updated) setCurrentStudent(updated);
+      }
+  }
+
   const resetTeacherForm = () => {
       setTeacherEmail('');
       setTeacherPassword('');
       setTeacherName('');
+      setClassName('');
       setTeacherAuthError('');
       setIsRegistering(false);
   }
 
-  // 1. Activity View (Game Loop)
+  // 1. Placement Test Flow
+  if (role === UserRole.STUDENT && currentStudent && isTakingPlacementTest) {
+      return (
+          <PlacementTestView 
+            student={currentStudent}
+            onComplete={handlePlacementComplete}
+          />
+      );
+  }
+
+  // 2. Activity View (Game Loop)
   if (role === UserRole.STUDENT && currentStudent && activeModule) {
     return (
       <ActivityView 
@@ -105,26 +160,29 @@ const App: React.FC = () => {
     );
   }
 
-  // 2. Student Portal
+  // 3. Student Portal
   if (role === UserRole.STUDENT && currentStudent) {
     return (
       <StudentPortal 
         student={currentStudent} 
         onSelectModule={handleModuleSelect}
         onLogout={() => {
+            clearSession();
             setRole(null);
             setCurrentStudent(null);
-        }} 
+        }}
+        onStartPlacement={() => setIsTakingPlacementTest(true)}
       />
     );
   }
 
-  // 3. Teacher Dashboard
+  // 4. Teacher Dashboard
   if (role === UserRole.TEACHER && currentTeacher) {
     return (
       <TeacherDashboard 
         teacher={currentTeacher}
         onLogout={() => {
+            clearSession();
             setRole(null);
             setCurrentTeacher(null);
             resetTeacherForm();
@@ -133,17 +191,17 @@ const App: React.FC = () => {
     );
   }
 
-  // 4. Modern Landing / Login Screen
+  // 5. Modern Landing / Login Screen
   return (
     <div className="min-h-screen bg-slate-50 relative overflow-hidden font-sans">
         {/* Abstract Background Shapes */}
         <div className="absolute top-[-10%] right-[-5%] w-[600px] h-[600px] bg-blue-200 rounded-full blur-[100px] opacity-40 animate-pulse" />
         <div className="absolute bottom-[-10%] left-[-10%] w-[500px] h-[500px] bg-purple-200 rounded-full blur-[80px] opacity-40 animate-pulse" style={{animationDelay: '2s'}} />
 
-        <div className="max-w-7xl mx-auto min-h-screen flex flex-col lg:flex-row items-center justify-center p-6 lg:gap-16 relative z-10">
+        <div className="max-w-7xl mx-auto min-h-screen flex flex-col items-center justify-center p-6 gap-8 relative z-10">
             
-            {/* Left: Branding & Value Prop */}
-            <div className="lg:w-1/2 text-center lg:text-left mb-12 lg:mb-0">
+            {/* Branding & Value Prop */}
+            <div className="text-center max-w-2xl">
                 <motion.div 
                     initial={{ opacity: 0, y: 20 }} 
                     animate={{ opacity: 1, y: 0 }} 
@@ -155,17 +213,17 @@ const App: React.FC = () => {
                     <h1 className="text-6xl lg:text-7xl font-display font-bold text-slate-900 leading-tight mb-6">
                         SpellQuest <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-600 to-purple-600">NZ</span>
                     </h1>
-                    <p className="text-xl text-slate-600 mb-8 leading-relaxed max-w-lg mx-auto lg:mx-0">
+                    <p className="text-xl text-slate-600 mb-8 leading-relaxed max-w-lg mx-auto">
                         The intelligent, gamified spelling platform for Kiwi classrooms. Powered by AI to adapt to every student's learning journey.
                     </p>
-                    <div className="flex flex-wrap justify-center lg:justify-start gap-4 text-sm font-semibold text-slate-500">
+                    <div className="flex flex-wrap justify-center gap-4 text-sm font-semibold text-slate-500">
                         <div className="flex items-center gap-2"><ShieldCheck size={18} className="text-green-500" /> Safe & Secure</div>
-                        <div className="flex items-center gap-2"><BookOpen size={18} className="text-blue-500" /> Years 1-8</div>
+                        <div className="flex items-center gap-2"><BookOpen size={18} className="text-blue-500" /> Years 1-8 + NCEA</div>
                     </div>
                 </motion.div>
             </div>
 
-            {/* Right: Login Interface */}
+            {/* Login Interface */}
             <motion.div 
                 initial={{ opacity: 0, scale: 0.95 }} 
                 animate={{ opacity: 1, scale: 1 }} 
@@ -261,6 +319,7 @@ const App: React.FC = () => {
 
                                 <div className="space-y-4">
                                     {isRegistering && (
+                                        <>
                                         <div className="relative group">
                                             <User className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-purple-500 transition-colors" size={20} />
                                             <input 
@@ -271,6 +330,17 @@ const App: React.FC = () => {
                                                 className="w-full pl-12 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-4 focus:ring-purple-100 focus:border-purple-500 outline-none font-medium text-slate-700 transition-all"
                                             />
                                         </div>
+                                        <div className="relative group">
+                                            <School className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-purple-500 transition-colors" size={20} />
+                                            <input 
+                                                type="text"
+                                                value={className}
+                                                onChange={(e) => setClassName(e.target.value)}
+                                                placeholder="Class Name (e.g. Room 10)"
+                                                className="w-full pl-12 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-4 focus:ring-purple-100 focus:border-purple-500 outline-none font-medium text-slate-700 transition-all"
+                                            />
+                                        </div>
+                                        </>
                                     )}
 
                                     <div className="relative group">

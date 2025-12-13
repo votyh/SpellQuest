@@ -1,3 +1,4 @@
+
 export enum UserRole {
   STUDENT = 'STUDENT',
   TEACHER = 'TEACHER',
@@ -26,11 +27,20 @@ export interface Achievement {
   unlockedAt?: number; // Timestamp
 }
 
+export interface ShopItem {
+    id: string;
+    name: string;
+    type: 'HAT' | 'GLASSES' | 'BACKGROUND' | 'ACCESSORY';
+    icon: string; // Emoji or image URL
+    cost: number;
+}
+
 export interface Teacher {
   id: string;
   name: string;
   email: string;
   password: string; // Plaintext for prototype
+  avatar?: string; // Emoji
 }
 
 export interface Student {
@@ -38,6 +48,7 @@ export interface Student {
   loginCode: string; // The "password" provided by teacher
   name: string;
   avatar: string; // Emoji char
+  yearLevel?: number; 
   xp: number;
   level: number;
   currentStreak: number;
@@ -45,6 +56,42 @@ export interface Student {
   stars: number;
   progress: Record<string, ModuleProgress>; // moduleId -> progress
   achievements: Achievement[];
+  assignedModuleIds?: string[]; // IDs of modules assigned by teacher
+  customRewards?: string[]; // List of rewards given by teacher (e.g. "Free Time", "Sticker")
+  
+  // Placement Test
+  placementTestStatus: 'NOT_STARTED' | 'COMPLETED' | 'SKIPPED';
+  placementLevel?: number;
+  placementAnalysis?: string;
+
+  // Shop / Nest
+  inventory: string[]; // Array of ShopItem IDs
+  equipped: {
+      hat?: string;
+      glasses?: string;
+      background?: string;
+      accessory?: string;
+  };
+}
+
+export interface MistakeRecord {
+    question: string;
+    attempt: string;
+    correct: string;
+}
+
+export interface LessonPhaseState {
+    phase: 'LOADING' | 'INTRO' | 'PRACTICE' | 'CONCEPT' | 'TEST' | 'RATING' | 'SUMMARY' | 'ERROR';
+    subIndex: number;
+    testScore: number;
+    content: LessonContent; // We must save the content so the questions don't change on resume
+    mistakes: MistakeRecord[]; // Track incorrect answers for analysis
+    
+    // Granular Resume State
+    userAnswer?: string;
+    feedback?: 'correct' | 'incorrect' | 'hint' | null;
+    feedbackTitle?: string;
+    attemptsForCurrent?: number;
 }
 
 export interface ModuleProgress {
@@ -52,6 +99,8 @@ export interface ModuleProgress {
   score: number; // 0-100 (Based on Test section)
   attempts: number;
   confidence?: number; // 1-5 rating
+  performanceAnalysis?: string; // AI generated feedback on specific mistakes
+  resumeState?: LessonPhaseState; // Saved state if incomplete
 }
 
 export interface ClassGroup {
@@ -59,6 +108,7 @@ export interface ClassGroup {
   teacherId: string;
   name: string;
   studentIds: string[];
+  avatar?: string;
 }
 
 export interface LearningModule {
@@ -68,6 +118,9 @@ export interface LearningModule {
   theme: ModuleTheme;
   description: string;
   ruleExplanation: string;
+  isCustom?: boolean; // If true, generated from teacher words
+  customWords?: string[]; 
+  createdBy?: string; // Teacher ID
 }
 
 export interface ActivityItem {

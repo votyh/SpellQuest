@@ -8,17 +8,18 @@ interface Props {
     moduleTitle: string;
     ruleExplanation: string;
     currentQuestion: string;
+    correctAnswer?: string; // Optional: Pass hidden target to AI for better hinting
     lessonWords?: string[];
 }
 
 const SUGGESTED_QUESTIONS = [
-    "Can you give me a hint?",
-    "Use it in a sentence.",
-    "Explain the rule again.",
-    "Why is this spelling right?"
+    "Give me a rhyme!",
+    "What's a similar word?",
+    "Use it in a funny sentence.",
+    "First letter hint?"
 ];
 
-const TudorAI: React.FC<Props> = ({ moduleTitle, ruleExplanation, currentQuestion, lessonWords }) => {
+const TudorAI: React.FC<Props> = ({ moduleTitle, ruleExplanation, currentQuestion, correctAnswer, lessonWords }) => {
     const [isOpen, setIsOpen] = useState(false);
     const [messages, setMessages] = useState<{role: 'user'|'tudor', text: string}[]>([
         { role: 'tudor', text: "Kia ora! I'm Tudor. Stuck on a tricky word? Ask me anything!" }
@@ -47,6 +48,7 @@ const TudorAI: React.FC<Props> = ({ moduleTitle, ruleExplanation, currentQuestio
             moduleTitle,
             rule: ruleExplanation,
             currentQuestion,
+            correctAnswer,
             exampleWords: lessonWords
         });
 

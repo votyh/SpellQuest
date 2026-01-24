@@ -1,13 +1,71 @@
+
 import { ClassGroup, Student, ModuleTheme, LearningModule, Achievement, Teacher, UserRole, ModuleProgress, LessonPhaseState, ShopItem } from '../types';
 
-// CHANGED TO v18 FOR CONTENT UPDATE
-const STORAGE_KEY_STUDENTS = 'sq_students_v18';
-const STORAGE_KEY_CLASSES = 'sq_classes_v18';
-const STORAGE_KEY_TEACHERS = 'sq_teachers_v18';
-const STORAGE_KEY_SESSION = 'sq_session_v18';
-const STORAGE_KEY_CUSTOM_MODULES = 'sq_custom_modules_v18';
+// VERSION 23 - New Reading Level Calibration (Data Wipe)
+const CURRENT_VERSION = 'v23';
+const STORAGE_KEY_STUDENTS = `sq_students_${CURRENT_VERSION}`;
+const STORAGE_KEY_CLASSES = `sq_classes_${CURRENT_VERSION}`;
+const STORAGE_KEY_TEACHERS = `sq_teachers_${CURRENT_VERSION}`;
+const STORAGE_KEY_SESSION = `sq_session_${CURRENT_VERSION}`;
+const STORAGE_KEY_CUSTOM_MODULES = `sq_custom_modules_${CURRENT_VERSION}`;
 
-// Seed Data
+// --- DATA MIGRATION LOGIC ---
+const migrateLegacyData = () => {
+    try {
+        if (!localStorage.getItem(STORAGE_KEY_STUDENTS)) {
+            // We want to force a clean slate for reading logs, so we won't deeply merge old student data
+            // but we will try to preserve XP/Stars if possible from immediately previous version if needed.
+            // For now, based on instructions "Delete all the current saved ones", we treat this as a fresh start for logic
+            // but preserve teacher/class structure if it exists.
+            
+            const legacyVersions = ['v22', 'v21', 'v20', 'v19', 'v18'];
+            for (const ver of legacyVersions) {
+                const key = `sq_students_${ver}`;
+                const legacyData = localStorage.getItem(key);
+                if (legacyData) {
+                    // Start fresh for students to clear bad reading logs
+                    // But we can keep teachers/classes
+                    const legacyClasses = localStorage.getItem(`sq_classes_${ver}`);
+                    if (legacyClasses) localStorage.setItem(STORAGE_KEY_CLASSES, legacyClasses);
+                    const legacyTeachers = localStorage.getItem(`sq_teachers_${ver}`);
+                    if (legacyTeachers) localStorage.setItem(STORAGE_KEY_TEACHERS, legacyTeachers);
+                    const legacyCustom = localStorage.getItem(`sq_custom_modules_${ver}`);
+                    if (legacyCustom) localStorage.setItem(STORAGE_KEY_CUSTOM_MODULES, legacyCustom);
+                    break;
+                }
+            }
+        }
+    } catch (e) {
+        console.error("Migration failed", e);
+    }
+};
+
+migrateLegacyData();
+
+const SYNC_CHANNEL = new BroadcastChannel('spellquest_sync_v1');
+
+const notifyChanges = () => {
+    const timestamp = Date.now();
+    SYNC_CHANNEL.postMessage({ type: 'DATA_UPDATE', timestamp });
+    window.dispatchEvent(new CustomEvent('sq_local_update', { detail: { timestamp } }));
+    window.dispatchEvent(new Event('storage'));
+};
+
+export const subscribeToStore = (callback: () => void): () => void => {
+    const channel = new BroadcastChannel('spellquest_sync_v1');
+    const handleUpdate = () => requestAnimationFrame(() => callback());
+    channel.onmessage = (event) => { if (event.data.type === 'DATA_UPDATE') handleUpdate(); };
+    window.addEventListener('sq_local_update', handleUpdate);
+    window.addEventListener('storage', handleUpdate);
+    window.addEventListener('focus', handleUpdate);
+    return () => {
+        channel.close();
+        window.removeEventListener('sq_local_update', handleUpdate);
+        window.removeEventListener('storage', handleUpdate);
+        window.removeEventListener('focus', handleUpdate);
+    };
+};
+
 const SEED_TEACHER: Teacher = {
     id: 't1',
     name: 'Mr. D', 
@@ -17,7 +75,8 @@ const SEED_TEACHER: Teacher = {
 };
 
 const SEED_CLASSES: ClassGroup[] = [
-  { id: 'c1', teacherId: 't1', name: 'Room 1', studentIds: ['s1', 's2'], avatar: '🚀' }
+  { id: 'c1', teacherId: 't1', name: 'Room 1', studentIds: ['s1', 's2'], avatar: '🚀' },
+  { id: 'c2', teacherId: 't1', name: 'Senior English', studentIds: ['s3', 's4'], avatar: '🎓' }
 ];
 
 export const SHOP_ITEMS: ShopItem[] = [
@@ -42,16 +101,17 @@ const SEED_STUDENTS: Student[] = [
       name: 'Nethalee', 
       avatar: '👸', 
       yearLevel: 4,
-      stars: 50, // Give some starting cash for testing
+      stars: 0, 
       xp: 0, 
       level: 1, 
       currentStreak: 0, 
       lastActiveDate: new Date(0).toISOString(),
       progress: {}, 
       achievements: [],
-      assignedModuleIds: [], 
+      assignedModuleIds: ['l2_magic_e', 'l2_syllables_open', 'l2_vowel_teams', 'l2_bossy_r', 'l2_soft_c_g', 'l2_y_ending'], 
+      suggestedModuleIds: [],
       customRewards: [],
-      placementTestStatus: 'NOT_STARTED',
+      readingLog: [],
       inventory: [],
       equipped: {}
   },
@@ -68,191 +128,350 @@ const SEED_STUDENTS: Student[] = [
       lastActiveDate: new Date(0).toISOString(), 
       progress: {}, 
       achievements: [],
-      assignedModuleIds: [],
+      assignedModuleIds: ['l2_magic_e', 'l2_syllables_open', 'l2_vowel_teams', 'l2_bossy_r', 'l2_soft_c_g', 'l2_y_ending'],
+      suggestedModuleIds: [],
       customRewards: [],
-      placementTestStatus: 'NOT_STARTED',
+      readingLog: [],
       inventory: [],
       equipped: {}
+  },
+  { 
+      id: 's3', 
+      loginCode: 'UDARI-13', 
+      name: 'Udari', 
+      avatar: '👩‍🎓', 
+      yearLevel: 13,
+      stars: 0, 
+      xp: 0, 
+      level: 1, 
+      currentStreak: 0, 
+      lastActiveDate: new Date(0).toISOString(),
+      progress: {}, 
+      achievements: [],
+      assignedModuleIds: ['l8_argumentation', 'l8_scholarly_conventions'], 
+      suggestedModuleIds: [],
+      customRewards: [],
+      readingLog: [],
+      inventory: [],
+      equipped: {},
+      teacherAssessment: {
+          readingLevel: 13,
+          focusAreas: ['Critical Analysis', 'Complex Argumentation']
+      }
+  },
+  { 
+      id: 's4', 
+      loginCode: 'VONAL-10', 
+      name: 'Vonal', 
+      avatar: '🕵️‍♂️', 
+      yearLevel: 10,
+      stars: 0, 
+      xp: 0, 
+      level: 1, 
+      currentStreak: 0, 
+      lastActiveDate: new Date(0).toISOString(), 
+      progress: {}, 
+      achievements: [],
+      assignedModuleIds: ['l5_sci_terms', 'l5_foreign', 'l5_lit_terms'],
+      suggestedModuleIds: [],
+      customRewards: [],
+      readingLog: [],
+      inventory: [],
+      equipped: {},
+      teacherAssessment: {
+          readingLevel: 10,
+          focusAreas: ['Scientific Vocabulary']
+      }
   },
 ];
 
 export const MODULES: LearningModule[] = [
-  // --- NZC LEVEL 1 (The Code: Pink/Red/Yellow) ---
+  // --- NZC LEVEL 1 (Years 0-2: The Code) ---
   {
-    id: 'code_1',
+    id: 'l1_satpin',
     title: 'Initial Sounds (SATPIN)',
     level: 'Level 1 (Year 0-1)',
     theme: ModuleTheme.FOREST,
-    description: 'Start your journey with the most common sounds: S, A, T, P, I, N.',
-    ruleExplanation: 'These letters make distinct sounds. "A" says /a/ like apple. "S" says /s/ like snake.',
+    description: 'Start with S, A, T, P, I, N.',
+    ruleExplanation: 'These letters make distinct sounds. "A" says /a/ (apple), "S" says /s/ (snake).',
   },
   {
-    id: 'code_2',
+    id: 'l1_short_vowels',
+    title: 'Short Vowels (A E I O U)',
+    level: 'Level 1 (Year 1)',
+    theme: ModuleTheme.FOREST,
+    description: 'Hearing the difference between cat, cot, cut, kit, ket.',
+    ruleExplanation: 'Short vowels are quick sounds. A (apple), E (egg), I (igloo), O (octopus), U (umbrella).',
+  },
+  {
+    id: 'l1_cvc',
     title: 'CVC Foundations',
     level: 'Level 1 (Year 1)',
     theme: ModuleTheme.FOREST,
-    description: 'Building simple words with Consonant-Vowel-Consonant.',
-    ruleExplanation: 'In a CVC word, the vowel is usually short. C-a-t (Cat), H-o-t (Hot).',
+    description: 'Building simple words like Cat, Dog, Bus.',
+    ruleExplanation: 'Consonant-Vowel-Consonant words usually have a short vowel sound.',
   },
   {
-    id: 'code_3',
+    id: 'l1_digraphs',
     title: 'Digraph Discovery',
     level: 'Level 1 (Year 1-2)',
     theme: ModuleTheme.OCEAN,
-    description: 'Two letters making one sound: sh, ch, th, ng.',
-    ruleExplanation: 'A digraph is two letters holding hands to make a new sound. "S" and "H" together say /sh/ like "Ship".',
+    description: 'Two letters, one sound: sh, ch, th, ng.',
+    ruleExplanation: 'When H makes friends with S, C, or T, they make a new sound together.',
   },
   {
-    id: 'code_4',
+    id: 'l1_blends',
     title: 'Blends Beach',
     level: 'Level 1 (Year 2)',
     theme: ModuleTheme.OCEAN,
-    description: 'Consonant blends at the start and end of words (st, bl, tr, nd).',
-    ruleExplanation: 'In a blend, you can still hear both sounds, but they glide together quickly. "Bl" in "Blue".',
+    description: 'Beginning and ending blends (st, bl, tr, nd).',
+    ruleExplanation: 'In a blend, you can hear both sounds gliding together quickly.',
   },
   {
-    id: 'code_5',
-    title: 'The "F/L/S/Z" Floss Rule',
+    id: 'l1_floss',
+    title: 'The Floss Rule',
     level: 'Level 1 (Year 2)',
     theme: ModuleTheme.OCEAN,
-    description: 'Why do we double letters at the end of words?',
-    ruleExplanation: 'If a short vowel word ends in f, l, s, or z, double the last letter! (Huff, Hill, Mess, Buzz).',
+    description: 'Double letters at the end (ff, ll, ss, zz).',
+    ruleExplanation: 'If a short vowel word ends in f, l, s, or z, double it! (Hill, Mess, Buzz).',
+  },
+  {
+    id: 'l1_ck_rule',
+    title: 'The "ck" Rule',
+    level: 'Level 1 (Year 2)',
+    theme: ModuleTheme.OCEAN,
+    description: 'When to use "ck" vs "k" at the end of a word.',
+    ruleExplanation: 'Use "ck" right after a short vowel (Duck). Use "k" after a consonant or long vowel (Milk, Cake).',
   },
 
-  // --- NZC LEVEL 2 (The Code: Blue/Green) ---
+  // --- NZC LEVEL 2 (Years 3-4: Patterns & Syllables) ---
   {
-    id: 'code_6',
+    id: 'l2_magic_e',
     title: 'Magic E Oasis',
-    level: 'Level 2 (Year 3-4)',
+    level: 'Level 2 (Year 3)',
     theme: ModuleTheme.DESERT,
-    description: 'The silent E that makes vowels say their name.',
-    ruleExplanation: 'An "e" at the end of a word jumps over one consonant to make the vowel long. "Hop" becomes "Hope".',
+    description: 'Silent E makes the vowel say its name.',
+    ruleExplanation: 'An "e" at the end jumps over one consonant to make the vowel long. (Hop -> Hope).',
   },
   {
-    id: 'code_7',
+    id: 'l2_syllables_open',
+    title: 'Open & Closed Syllables',
+    level: 'Level 2 (Year 3)',
+    theme: ModuleTheme.DESERT,
+    description: 'Breaking words into chunks.',
+    ruleExplanation: 'Closed syllable ends in a consonant (short vowel: Cat). Open syllable ends in a vowel (long vowel: Go, Hi).',
+  },
+  {
+    id: 'l2_vowel_teams',
     title: 'Vowel Team Valley',
     level: 'Level 2 (Year 3-4)',
     theme: ModuleTheme.FOREST,
     description: 'Common teams: ai, ay, ee, ea, oa.',
-    ruleExplanation: 'When two vowels go walking, the first one often does the talking (says its name). "Rain" (ai), "Boat" (oa).',
+    ruleExplanation: 'When two vowels go walking, the first one does the talking (Rain, Boat).',
   },
   {
-    id: 'code_8',
+    id: 'l2_bossy_r',
     title: 'Bossy R Canyon',
     level: 'Level 2 (Year 3-4)',
     theme: ModuleTheme.DESERT,
-    description: 'R-controlled vowels: ar, or, er, ir, ur.',
-    ruleExplanation: 'The letter R changes the vowel sound. "Car" doesn\'t sound like "Cat". "Er", "Ir", and "Ur" often sound the same (Her, Bird, Fur).',
+    description: 'ar, or, er, ir, ur patterns.',
+    ruleExplanation: 'The letter R changes the vowel sound. Car, Fork, Bird, Turn.',
   },
   {
-    id: 'code_9',
+    id: 'l2_soft_c_g',
     title: 'Soft C and G',
-    level: 'Level 2 (Year 3-4)',
+    level: 'Level 2 (Year 4)',
     theme: ModuleTheme.DESERT,
     description: 'When C sounds like S, and G sounds like J.',
-    ruleExplanation: 'C and G go soft when followed by E, I, or Y. "City", "Gem", "Cycle". Otherwise they are hard (Cat, Go).',
+    ruleExplanation: 'C and G go soft when followed by E, I, or Y (City, Gem, Gym).',
+  },
+  {
+    id: 'l2_y_ending',
+    title: 'The Many Sounds of Y',
+    level: 'Level 2 (Year 4)',
+    theme: ModuleTheme.DESERT,
+    description: 'Y as a vowel at the end of words.',
+    ruleExplanation: 'In short words, Y says "I" (Sky). In long words, Y says "E" (Happy).',
   },
 
-  // --- NZC LEVEL 3 (Morphology & Complex Patterns) ---
+  // --- NZC LEVEL 3 (Years 5-6: Morphology) ---
   {
-    id: 'morph_1',
+    id: 'l3_plurals',
     title: 'Plural Peaks',
-    level: 'Level 3 (Year 5-6)',
+    level: 'Level 3 (Year 5)',
     theme: ModuleTheme.VOLCANO,
-    description: 'Rules for adding -s, -es, and changing y to i.',
-    ruleExplanation: 'Add -es if the word ends in s, x, z, ch, or sh. If it ends in consonant+y, change y to i and add es (Baby -> Babies).',
+    description: 'Adding -s, -es, and changing y to i.',
+    ruleExplanation: 'Add -es for sh/ch/s/x/z. Change Y to I and add ES if consonant before Y (Baby -> Babies).',
   },
   {
-    id: 'morph_2',
-    title: 'Prefix Power',
+    id: 'l3_apostrophes',
+    title: 'Possession Station',
+    level: 'Level 3 (Year 5)',
+    theme: ModuleTheme.VOLCANO,
+    description: 'Using apostrophes for ownership.',
+    ruleExplanation: 'Use \'s for one owner (The dog\'s bone). Use s\' for many owners (The dogs\' bones).',
+  },
+  {
+    id: 'l3_doubling',
+    title: 'The Doubling Rule',
     level: 'Level 3 (Year 5-6)',
+    theme: ModuleTheme.VOLCANO,
+    description: 'Adding suffixes like -ing and -ed.',
+    ruleExplanation: 'Double the final consonant if the word has 1 syllable, 1 short vowel, and 1 ending consonant (Run -> Running). Do not double if it has two consonants (Jump -> Jumping).',
+  },
+  {
+    id: 'l3_prefixes',
+    title: 'Prefix Power',
+    level: 'Level 3 (Year 6)',
     theme: ModuleTheme.VOLCANO,
     description: 'Changing meaning with un-, re-, dis-, pre-.',
-    ruleExplanation: 'Prefixes attach to the front of a base word. "Re-" means again (Replay). "Un-" means not (Unhappy).',
+    ruleExplanation: 'Prefixes attach to the front. Re- means again. Un- means not.',
   },
   {
-    id: 'morph_3',
-    title: 'Suffix Sands',
-    level: 'Level 3 (Year 5-6)',
-    theme: ModuleTheme.VOLCANO,
-    description: 'Doubling rules when adding -ing and -ed.',
-    ruleExplanation: 'Double the final consonant if the word has a short vowel and one consonant (Run -> Running). Do not double if it has two consonants (Jump -> Jumping).',
-  },
-  {
-    id: 'code_10',
+    id: 'l3_schwa',
     title: 'The Schwa Sound',
-    level: 'Level 3 (Year 5-6)',
+    level: 'Level 3 (Year 6)',
     theme: ModuleTheme.VOLCANO,
-    description: 'The unstressed "uh" sound found in many multi-syllable words.',
-    ruleExplanation: 'Any vowel can make the schwa sound in an unstressed syllable. "About" (A), "Pencil" (i), "Doctor" (o).',
+    description: 'The unstressed "uh" sound in longer words.',
+    ruleExplanation: 'Any vowel can say "uh" in an unstressed syllable (About, Pencil, Doctor).',
+  },
+  {
+    id: 'l3_homophones',
+    title: 'Tricky Homophones',
+    level: 'Level 3 (Year 6)',
+    theme: ModuleTheme.VOLCANO,
+    description: 'There, Their, They\'re and friends.',
+    ruleExplanation: 'There (place), Their (owner), They\'re (they are). To (direction), Too (also), Two (2).',
   },
 
-  // --- NZC LEVEL 4 (Etymology & Advanced Rules) ---
+  // --- NZC LEVEL 4 (Years 7-8: Etymology & Complexity) ---
   {
-    id: 'etym_1',
+    id: 'l4_roots',
     title: 'Greek & Latin Roots',
-    level: 'Level 4 (Year 7-8)',
+    level: 'Level 4 (Year 7)',
     theme: ModuleTheme.SPACE,
-    description: 'Building blocks of English: Tele, Scope, Port, Struct.',
-    ruleExplanation: 'English words are built like lego. "Tele" (far) + "Scope" (look) = Telescope. "Port" means to carry.',
+    description: 'Building blocks: Tele, Scope, Port, Struct.',
+    ruleExplanation: 'English words are like lego. Tele (far) + Scope (see) = Telescope.',
   },
   {
-    id: 'etym_2',
-    title: 'Complex Endings',
-    level: 'Level 4 (Year 7-8)',
-    theme: ModuleTheme.SPACE,
-    description: '-tion, -sion, -cian, -ture.',
-    ruleExplanation: '-tion is the most common "shun". -sion is used if the base word ends in s/d (Expand->Expansion). -cian is for people (Musician).',
-  },
-  {
-    id: 'etym_3',
-    title: 'Homophone Horizon',
-    level: 'Level 4 (Year 7-8)',
-    theme: ModuleTheme.SPACE,
-    description: 'Words that sound same but differ in meaning/spelling.',
-    ruleExplanation: 'Context is key. Their (possession), There (place), They\'re (they are). To (direction), Too (also), Two (2).',
-  },
-  {
-    id: 'etym_4',
+    id: 'l4_silent_letters',
     title: 'Silent Letter Space',
-    level: 'Level 4 (Year 7-8)',
+    level: 'Level 4 (Year 7)',
     theme: ModuleTheme.SPACE,
     description: 'Ghost letters: kn, gn, wr, mb.',
-    ruleExplanation: 'Silent letters are often leftovers from old languages. Knight (Old English). Tsunami (Japanese). Psychology (Greek).',
+    ruleExplanation: 'Silent letters are history traces. Knight (Old English), Psychology (Greek).',
+  },
+  {
+    id: 'l4_complex_endings',
+    title: 'Complex Endings',
+    level: 'Level 4 (Year 8)',
+    theme: ModuleTheme.SPACE,
+    description: '-tion, -sion, -cian, -ture.',
+    ruleExplanation: '-tion is common. -sion often follows S or D (Expand -> Expansion). -cian is for people (Musician).',
+  },
+  {
+    id: 'l4_adv_suffixes',
+    title: 'Advanced Suffixes',
+    level: 'Level 4 (Year 8)',
+    theme: ModuleTheme.SPACE,
+    description: '-ance vs -ence, -able vs -ible.',
+    ruleExplanation: 'Hard rules! Often -able if you can hear the base word (Comfort -> Comfortable).',
   },
 
-  // --- NZC LEVEL 5 (Academic & Secondary Prep - Years 9-10) ---
+  // --- NZC LEVEL 5 (Years 9-10: Academic & Prep) ---
   {
-    id: 'acad_1',
+    id: 'l5_acad_verbs',
     title: 'Academic Verbs',
-    level: 'Level 5 (Year 9-10)',
+    level: 'Level 5 (Year 9)',
     theme: ModuleTheme.SPACE,
-    description: 'Words for essays: Analyse, Evaluate, Synthesise.',
-    ruleExplanation: 'Academic spelling focuses on precision. Note the "yse" in Analyse (NZ/UK spelling) vs "yze" (US).',
+    description: 'Essay words: Analyse, Evaluate, Synthesise.',
+    ruleExplanation: 'Academic spelling is precise. Analyse (NZ/UK) vs Analyze (US).',
   },
   {
-    id: 'acad_2',
-    title: 'Scientific Terminology',
-    level: 'Level 5 (Year 9-10)',
+    id: 'l5_hyphens',
+    title: 'Hyphenation Station',
+    level: 'Level 5 (Year 9)',
     theme: ModuleTheme.SPACE,
-    description: 'Decoding complex science terms.',
-    ruleExplanation: 'Science words follow strict patterns. "Photo" (light) + "Synthesis" (putting together).',
+    description: 'Compound adjectives and prefixes.',
+    ruleExplanation: 'Hyphenate compound adjectives before a noun (A well-known author) but not after (The author is well known).',
   },
   {
-    id: 'acad_3',
-    title: 'Foreign Borrowings',
-    level: 'Level 5 (Year 9-10)',
+    id: 'l5_sci_terms',
+    title: 'Scientific Vocabulary',
+    level: 'Level 5 (Year 10)',
     theme: ModuleTheme.SPACE,
-    description: 'French and other loan words used in English.',
-    ruleExplanation: 'Words kept their original spelling rules. "Ch" says /sh/ in French words like Chef, Chute, Champagne.',
+    description: 'Photosynthesis, Chromatography, Hypothesis.',
+    ruleExplanation: 'Science words use Greek/Latin logic. Photo (light) + Synthesis (put together).',
   },
   {
-    id: 'acad_4',
-    title: 'Advanced Grammar',
-    level: 'Level 5 (Year 9-10)',
+    id: 'l5_foreign',
+    title: 'Loan Words',
+    level: 'Level 5 (Year 10)',
     theme: ModuleTheme.SPACE,
-    description: 'Tricky punctuation and grammar distinctions.',
-    ruleExplanation: 'Effect (noun) vs Affect (verb). Practice vs Practise (in NZ/UK, \'c\' is noun, \'s\' is verb).',
+    description: 'French and Maori loan words.',
+    ruleExplanation: 'Loan words keep original spelling. Ch -> /sh/ in Chef (French). Wh -> /f/ in Whānau (Maori).',
+  },
+  {
+    id: 'l5_lit_terms',
+    title: 'Literary Analysis',
+    level: 'Level 5 (Year 10)',
+    theme: ModuleTheme.SPACE,
+    description: 'Metaphor, Simile, Onomatopoeia, Soliloquy.',
+    ruleExplanation: 'Many literary terms come from Greek. Onomatopoeia is spelling sounds.',
+  },
+
+  // --- NCEA LEVEL 1 (Year 11) ---
+  {
+    id: 'l6_unfamiliar_text',
+    title: 'Unfamiliar Text Analysis',
+    level: 'NCEA Level 1 (Year 11)',
+    theme: ModuleTheme.SPACE,
+    description: 'Identifying tone, purpose, and audience.',
+    ruleExplanation: 'Writers use specific choices to target an audience. Tones can be objective, subjective, critical, or nostalgic.',
+  },
+  {
+    id: 'l6_language_features',
+    title: 'Advanced Language Features',
+    level: 'NCEA Level 1 (Year 11)',
+    theme: ModuleTheme.SPACE,
+    description: 'Hyperbole, Litotes, Euphemism, Paradox.',
+    ruleExplanation: 'Advanced features add nuance. Litotes is understatement (Not bad). Paradox is a contradictory truth.',
+  },
+
+  // --- NCEA LEVEL 2 (Year 12) ---
+  {
+    id: 'l7_critical_analysis',
+    title: 'Critical Analysis',
+    level: 'NCEA Level 2 (Year 12)',
+    theme: ModuleTheme.SPACE,
+    description: 'Evaluating bias, reliability, and subtext.',
+    ruleExplanation: 'Critical analysis looks beneath the surface. Bias is an inclination for or against a group or idea.',
+  },
+  {
+    id: 'l7_academic_vocab',
+    title: 'Academic Vocabulary L2',
+    level: 'NCEA Level 2 (Year 12)',
+    theme: ModuleTheme.SPACE,
+    description: 'Words for precise academic expression.',
+    ruleExplanation: 'Use precise verbs. Instead of "says", use "asserts", "implies", "demonstrates", or "contented".',
+  },
+
+  // --- NCEA LEVEL 3 (Year 13) ---
+  {
+    id: 'l8_argumentation',
+    title: 'Complex Argumentation',
+    level: 'NCEA Level 3 (Year 13)',
+    theme: ModuleTheme.SPACE,
+    description: 'Constructing nuanced arguments and counter-arguments.',
+    ruleExplanation: 'A strong argument acknowledges complexity. Use "However", "Conversely", "While it is true that..." to weave ideas.',
+  },
+  {
+    id: 'l8_scholarly_conventions',
+    title: 'Scholarly Writing',
+    level: 'NCEA Level 3 (Year 13)',
+    theme: ModuleTheme.SPACE,
+    description: 'Citations, referencing, and objective voice.',
+    ruleExplanation: 'Scholarly writing requires evidence. Integrate quotes seamlessly and reference sources accurately.',
   }
 ];
 
@@ -270,14 +489,12 @@ export const getStudents = (): Student[] => {
 export const getClasses = (teacherId?: string): ClassGroup[] => {
   const stored = localStorage.getItem(STORAGE_KEY_CLASSES);
   let classes: ClassGroup[];
-  
   if (!stored) {
     localStorage.setItem(STORAGE_KEY_CLASSES, JSON.stringify(SEED_CLASSES));
     classes = SEED_CLASSES;
   } else {
     classes = JSON.parse(stored);
   }
-
   if (teacherId) {
       return classes.filter(c => c.teacherId === teacherId);
   }
@@ -306,8 +523,7 @@ export const saveCustomModule = (module: LearningModule) => {
     const current = getCustomModules();
     current.push(module);
     localStorage.setItem(STORAGE_KEY_CUSTOM_MODULES, JSON.stringify(current));
-    // Dispatch storage event manually for same-window updates
-    window.dispatchEvent(new Event('storage'));
+    notifyChanges();
 }
 
 // --- SESSION MANAGEMENT ---
@@ -330,7 +546,7 @@ export const getSession = (): { role: UserRole, id: string } | null => {
 export const registerTeacher = (name: string, email: string, password: string, className: string): Teacher | null => {
     const teachers = getTeachers();
     if (teachers.find(t => t.email.toLowerCase() === email.toLowerCase())) {
-        return null; // Already exists
+        return null;
     }
     const newTeacher: Teacher = {
         id: `t${Date.now()}`,
@@ -341,10 +557,7 @@ export const registerTeacher = (name: string, email: string, password: string, c
     };
     teachers.push(newTeacher);
     localStorage.setItem(STORAGE_KEY_TEACHERS, JSON.stringify(teachers));
-    
-    // Automatically create the class
     createClass(className, newTeacher.id);
-    
     return newTeacher;
 };
 
@@ -354,13 +567,38 @@ export const loginTeacher = (email: string, password: string): Teacher | null =>
     return teacher || null;
 };
 
+export const loginOrRegisterTeacherViaGoogle = (email: string, name: string, pictureUrl: string): Teacher => {
+    const teachers = getTeachers();
+    let teacher = teachers.find(t => t.email.toLowerCase() === email.toLowerCase());
+
+    if (!teacher) {
+        teacher = {
+            id: `tg_${Date.now()}`,
+            name,
+            email,
+            password: 'GOOGLE_AUTH_USER',
+            avatar: pictureUrl || '👩‍🏫'
+        };
+        teachers.push(teacher);
+        localStorage.setItem(STORAGE_KEY_TEACHERS, JSON.stringify(teachers));
+        createClass(`${name.split(' ')[0]}'s Class`, teacher.id);
+    } else {
+        if (pictureUrl && !teacher.avatar?.startsWith('http')) {
+            teacher.avatar = pictureUrl;
+            localStorage.setItem(STORAGE_KEY_TEACHERS, JSON.stringify(teachers));
+        }
+    }
+    notifyChanges();
+    return teacher;
+};
+
 export const updateTeacher = (updatedTeacher: Teacher) => {
     const teachers = getTeachers();
     const index = teachers.findIndex(t => t.id === updatedTeacher.id);
     if (index !== -1) {
         teachers[index] = updatedTeacher;
         localStorage.setItem(STORAGE_KEY_TEACHERS, JSON.stringify(teachers));
-        window.dispatchEvent(new Event('storage'));
+        notifyChanges();
     }
 };
 
@@ -377,7 +615,7 @@ export const createClass = (name: string, teacherId: string): ClassGroup => {
     };
     classes.push(newClass);
     localStorage.setItem(STORAGE_KEY_CLASSES, JSON.stringify(classes));
-    window.dispatchEvent(new Event('storage'));
+    notifyChanges();
     return newClass;
 }
 
@@ -387,32 +625,111 @@ export const updateClass = (updatedClass: ClassGroup) => {
     if (index !== -1) {
         classes[index] = updatedClass;
         localStorage.setItem(STORAGE_KEY_CLASSES, JSON.stringify(classes));
-        window.dispatchEvent(new Event('storage'));
+        notifyChanges();
     }
 }
+
+export const bulkAssignModuleToClass = (classId: string, moduleId: string, shouldAssign: boolean) => {
+    const classes = getClasses();
+    const cls = classes.find(c => c.id === classId);
+    if (!cls) return;
+    
+    const students = getStudents();
+    let changed = false;
+
+    students.forEach(s => {
+        if (cls.studentIds.includes(s.id)) {
+            const currentAssigned = s.assignedModuleIds || [];
+            if (shouldAssign) {
+                if (!currentAssigned.includes(moduleId)) {
+                    s.assignedModuleIds = [...currentAssigned, moduleId];
+                    changed = true;
+                }
+            } else {
+                if (currentAssigned.includes(moduleId)) {
+                    s.assignedModuleIds = currentAssigned.filter(id => id !== moduleId);
+                    changed = true;
+                }
+            }
+        }
+    });
+
+    if (changed) {
+        localStorage.setItem(STORAGE_KEY_STUDENTS, JSON.stringify(students));
+        notifyChanges();
+    }
+}
+
+// --- ALGORITHMIC SUGGESTIONS (REPLACES PLACEMENT TEST) ---
+
+// Helper to check if a module's level string (e.g. "Level 1 (Year 0-1)") matches student's year
+const isLevelMatch = (moduleLevelStr: string, studentYear: number): boolean => {
+    // Extract year range numbers from string like "Level 1 (Year 0-1)"
+    const match = moduleLevelStr.match(/Year (\d+)(-(\d+))?/);
+    if (match) {
+        const startYear = parseInt(match[1]);
+        const endYear = match[3] ? parseInt(match[3]) : startYear;
+        // Suggested if it matches current year or year-1 (for revision)
+        return studentYear >= startYear && studentYear <= endYear + 1;
+    }
+    return false;
+};
+
+// Main Algo
+const recalculateSuggestions = (student: Student): Student => {
+    // If no assessment, no suggestions
+    if (!student.teacherAssessment) {
+        return { ...student, suggestedModuleIds: [] };
+    }
+
+    const { readingLevel, focusAreas } = student.teacherAssessment;
+    const allModules = getAllModules();
+    const suggestions: string[] = [];
+
+    allModules.forEach(mod => {
+        let score = 0;
+        const modTitle = mod.title.toLowerCase();
+        const modDesc = mod.description.toLowerCase();
+
+        // 1. Year Level Match
+        if (isLevelMatch(mod.level, readingLevel)) {
+            score += 5;
+        }
+
+        // 2. Focus Area Match
+        if (focusAreas && focusAreas.length > 0) {
+            focusAreas.forEach(focus => {
+                const term = focus.toLowerCase();
+                if (modTitle.includes(term) || modDesc.includes(term)) {
+                    score += 10; // High priority if explicit match
+                }
+            });
+        }
+
+        // 3. Threshold for suggestion
+        if (score >= 5) {
+            suggestions.push(mod.id);
+        }
+    });
+
+    return { ...student, suggestedModuleIds: suggestions };
+};
 
 // --- STUDENT MANAGEMENT ---
 
 const updateStreak = (student: Student): Student => {
     const lastActive = new Date(student.lastActiveDate);
     const now = new Date();
-
-    const lastDateStr = lastActive.toDateString(); // e.g., "Fri Oct 27 2023" (Uses local browser time)
+    const lastDateStr = lastActive.toDateString(); 
     const todayStr = now.toDateString();
 
-    // 1. Same day login: No change to streak count
-    if (lastDateStr === todayStr) {
-        return student; 
-    }
+    if (lastDateStr === todayStr) return student; 
 
-    // 2. Consecutive day check
     const yesterday = new Date(now);
     yesterday.setDate(now.getDate() - 1);
     
     if (lastDateStr === yesterday.toDateString()) {
-        student.currentStreak += 1; // Streak continues!
-
-        // Streak Bonuses
+        student.currentStreak += 1; 
         if (student.currentStreak % 7 === 0) {
             student.xp += 50;
             student.stars += 5;
@@ -422,48 +739,12 @@ const updateStreak = (student: Student): Student => {
             student.stars += 20;
         }
     } else {
-        // 3. Missed a day: Reset streak to 1
         student.currentStreak = 1; 
     }
-
     return student;
 };
 
-// Helper to calculate level
-const calculateLevel = (xp: number) => {
-    return Math.floor(xp / 500) + 1;
-};
-
-// Helper to parse module level number string e.g. "Level 2 (Year 3-4)" -> 2
-const getModuleNumericLevel = (levelStr: string): number => {
-    const match = levelStr.match(/Level (\d+)/);
-    return match ? parseInt(match[1]) : 1;
-}
-
-const unlockModulesUpToLevel = (student: Student, placementLevel: number): Student => {
-    const updatedProgress = { ...student.progress };
-    
-    // Only standard modules, not custom ones
-    MODULES.forEach(module => {
-        const modLevel = getModuleNumericLevel(module.level);
-        
-        // If the module's level is STRICTLY LESS than the placement level, we mark it as done/skipped
-        // so the student can start fresh at their placement level.
-        if (modLevel < placementLevel) {
-            if (!updatedProgress[module.id] || !updatedProgress[module.id].completed) {
-                updatedProgress[module.id] = {
-                    completed: true,
-                    score: 100, // Give full credit for skipped levels to simplify unlocking
-                    attempts: 0,
-                    confidence: 5,
-                    performanceAnalysis: "Skipped via Placement Test"
-                };
-            }
-        }
-    });
-
-    return { ...student, progress: updatedProgress };
-};
+const calculateLevel = (xp: number) => Math.floor(xp / 500) + 1;
 
 export const updateStudent = (updatedStudent: Student) => {
   const students = getStudents();
@@ -471,31 +752,22 @@ export const updateStudent = (updatedStudent: Student) => {
   if (index !== -1) {
     let processedStudent = { ...updatedStudent };
     
-    // 1. Check if placement test just finished, unlock previous content
-    if (processedStudent.placementTestStatus === 'COMPLETED' && processedStudent.placementLevel && processedStudent.placementLevel > 1) {
-        // Logic to unlock all modules BELOW this level
-        processedStudent = unlockModulesUpToLevel(processedStudent, processedStudent.placementLevel);
+    // Recalculate suggestions if assessment changed
+    if (processedStudent.teacherAssessment) {
+        processedStudent = recalculateSuggestions(processedStudent);
     }
-
-    // 2. Check for Achievements
-    processedStudent = checkForAchievements(processedStudent);
     
-    // 3. Update Level based on new XP
+    processedStudent = checkForAchievements(processedStudent);
     processedStudent.level = calculateLevel(processedStudent.xp);
-
-    // 4. Update Streak & Active Date
     processedStudent = updateStreak(processedStudent);
     processedStudent.lastActiveDate = new Date().toISOString();
 
     students[index] = processedStudent;
     localStorage.setItem(STORAGE_KEY_STUDENTS, JSON.stringify(students));
-    
-    // Dispatch storage event manually for same-window updates (Teacher Dashboard sync)
-    window.dispatchEvent(new Event('storage'));
+    notifyChanges();
   }
 };
 
-// Save Resume State without marking activity as active/streak
 export const saveStudentProgressState = (studentId: string, moduleId: string, state: LessonPhaseState) => {
     const students = getStudents();
     const student = students.find(s => s.id === studentId);
@@ -505,7 +777,7 @@ export const saveStudentProgressState = (studentId: string, moduleId: string, st
         }
         student.progress[moduleId].resumeState = state;
         localStorage.setItem(STORAGE_KEY_STUDENTS, JSON.stringify(students));
-        // No dispatch needed here usually as it's internal state, but safe to add
+        notifyChanges();
     }
 };
 
@@ -554,12 +826,13 @@ export const createStudent = (name: string, classId: string) => {
     xp: 0,
     level: 1,
     currentStreak: 0,
-    lastActiveDate: new Date(0).toISOString(), // Never active
+    lastActiveDate: new Date(0).toISOString(), 
     progress: {},
     achievements: [],
     assignedModuleIds: [],
+    suggestedModuleIds: [],
     customRewards: [],
-    placementTestStatus: 'NOT_STARTED',
+    readingLog: [],
     inventory: [],
     equipped: {}
   };
@@ -573,25 +846,21 @@ export const createStudent = (name: string, classId: string) => {
     localStorage.setItem(STORAGE_KEY_CLASSES, JSON.stringify(classes));
   }
   
-  window.dispatchEvent(new Event('storage'));
+  notifyChanges();
   return newStudent;
 };
 
-// Authenticate
 export const authenticateStudent = (code: string): Student | null => {
     const students = getStudents();
     return students.find(s => s.loginCode.toUpperCase() === code.toUpperCase().trim()) || null;
 };
 
-// Get Classmates for Leaderboard
 export const getClassmates = (studentId: string): Student[] => {
     const classes = getClasses();
     const students = getStudents();
     const myClass = classes.find(c => c.studentIds.includes(studentId));
-    
     if (!myClass) return [];
-    
     return students
         .filter(s => myClass.studentIds.includes(s.id))
-        .sort((a, b) => b.xp - a.xp); // Sorted by XP desc
+        .sort((a, b) => b.xp - a.xp); 
 };

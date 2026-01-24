@@ -43,6 +43,33 @@ export interface Teacher {
   avatar?: string; // Emoji
 }
 
+export interface TeacherAssessment {
+    readingLevel: number; // 1-13 (Year Level)
+    focusAreas: string[]; // e.g. "phonics", "vowels", "morphology"
+    notes?: string;
+}
+
+export interface DifficultWord {
+  word: string;
+  meaning: string;
+}
+
+export interface MisreadWord {
+    word: string; // The word in the text
+    heard: string; // What the AI heard (approx)
+}
+
+export interface ReadingSession {
+  id: string;
+  date: string; // ISO String
+  transcript: string;
+  targetText?: string; // If they read a specific story
+  difficultWords: DifficultWord[];
+  misreadWords?: MisreadWord[]; // Words they got wrong
+  feedback?: string; // AI generated constructive feedback
+  assessedLevel?: string; // e.g. "Early Level 5", "Fluent Level 12"
+}
+
 export interface Student {
   id: string;
   loginCode: string; // The "password" provided by teacher
@@ -56,13 +83,17 @@ export interface Student {
   stars: number;
   progress: Record<string, ModuleProgress>; // moduleId -> progress
   achievements: Achievement[];
-  assignedModuleIds?: string[]; // IDs of modules assigned by teacher
-  customRewards?: string[]; // List of rewards given by teacher (e.g. "Free Time", "Sticker")
   
-  // Placement Test
-  placementTestStatus: 'NOT_STARTED' | 'COMPLETED' | 'SKIPPED';
-  placementLevel?: number;
-  placementAnalysis?: string;
+  assignedModuleIds?: string[]; // Mandatory assignments (Red badge)
+  suggestedModuleIds?: string[]; // AI/Algo suggestions based on assessment (Green badge)
+  
+  customRewards?: string[]; 
+  
+  // Teacher Input Data
+  teacherAssessment?: TeacherAssessment;
+
+  // Reading Log
+  readingLog?: ReadingSession[];
 
   // Shop / Nest
   inventory: string[]; // Array of ShopItem IDs

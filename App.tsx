@@ -1,19 +1,20 @@
 import React, { useState, useEffect } from 'react';
 import { UserRole, Student, Teacher, LearningModule } from './types';
-import { getStudents, getTeachers, MODULES, authenticateStudent, updateStudent, loginTeacher, registerTeacher, saveSession, clearSession, getSession } from './services/mockStore';
+import { getStudents, getTeachers, MODULES, authenticateStudent, updateStudent, loginTeacher, registerTeacher, saveSession, clearSession, getSession, subscribeToStore, loginOrRegisterTeacherViaGoogle } from './services/mockStore';
 import StudentPortal from './components/StudentPortal';
 import TeacherDashboard from './components/TeacherDashboard';
 import ActivityView from './components/ActivityView';
-import PlacementTestView from './components/PlacementTestView'; // Import the new view
 import { Users, GraduationCap, ArrowRight, Sparkles, BookOpen, ShieldCheck, ArrowLeft, Mail, Lock, User, School } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+
+// Placeholder Client ID - Replace with your own from Google Cloud Console
+const GOOGLE_CLIENT_ID = "YOUR_GOOGLE_CLIENT_ID.apps.googleusercontent.com"; 
 
 const App: React.FC = () => {
   const [role, setRole] = useState<UserRole | null>(null);
   const [currentStudent, setCurrentStudent] = useState<Student | null>(null);
   const [currentTeacher, setCurrentTeacher] = useState<Teacher | null>(null);
   const [activeModule, setActiveModule] = useState<LearningModule | null>(null);
-  const [isTakingPlacementTest, setIsTakingPlacementTest] = useState(false); // State for placement test
   
   // Student Login State
   const [loginCode, setLoginCode] = useState('');
@@ -52,6 +53,68 @@ const App: React.FC = () => {
         }
     }
   }, []);
+
+  // Global Sync Listener
+  useEffect(() => {
+    const unsubscribe = subscribeToStore(() => {
+        if (role === UserRole.STUDENT && currentStudent) {
+            const freshStudents = getStudents();
+            const fresh = freshStudents.find(s => s.id === currentStudent.id);
+            if (fresh) setCurrentStudent(fresh);
+        } else if (role === UserRole.TEACHER && currentTeacher) {
+            const freshTeachers = getTeachers();
+            const fresh = freshTeachers.find(t => t.id === currentTeacher.id);
+            if (fresh) setCurrentTeacher(fresh);
+        }
+    });
+    return unsubscribe;
+  }, [role, currentStudent?.id, currentTeacher?.id]);
+
+  // Handle Google Sign-In Initialization
+  useEffect(() => {
+      // Check if showTeacherAuth is true and google script is loaded
+      if (showTeacherAuth && (window as any).google) {
+          try {
+            (window as any).google.accounts.id.initialize({
+                client_id: GOOGLE_CLIENT_ID,
+                callback: handleGoogleCredentialResponse
+            });
+            (window as any).google.accounts.id.renderButton(
+                document.getElementById("googleButton"),
+                { theme: "outline", size: "large", width: "100%", text: "continue_with" } 
+            );
+          } catch (e) {
+              console.log("Google Init Error (likely missing client_id)", e);
+          }
+      }
+  }, [showTeacherAuth]);
+
+  // Decode JWT without external lib
+  const decodeJwt = (token: string) => {
+    try {
+        const base64Url = token.split('.')[1];
+        const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+        const jsonPayload = decodeURIComponent(window.atob(base64).split('').map(function(c) {
+            return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
+        }).join(''));
+        return JSON.parse(jsonPayload);
+    } catch (e) {
+        return null;
+    }
+  };
+
+  const handleGoogleCredentialResponse = (response: any) => {
+      const payload = decodeJwt(response.credential);
+      if (payload) {
+          const { email, name, picture } = payload;
+          const teacher = loginOrRegisterTeacherViaGoogle(email, name, picture);
+          
+          setCurrentTeacher(teacher);
+          setRole(UserRole.TEACHER);
+          saveSession(UserRole.TEACHER, teacher.id);
+          setShowTeacherAuth(false);
+      }
+  };
 
   const handleStudentLogin = () => {
     const student = authenticateStudent(loginCode);
@@ -120,15 +183,6 @@ const App: React.FC = () => {
     setActiveModule(null);
   };
 
-  const handlePlacementComplete = () => {
-      setIsTakingPlacementTest(false);
-      // Refresh student data
-      if (currentStudent) {
-          const updated = getStudents().find(s => s.id === currentStudent.id);
-          if (updated) setCurrentStudent(updated);
-      }
-  }
-
   const resetTeacherForm = () => {
       setTeacherEmail('');
       setTeacherPassword('');
@@ -138,17 +192,7 @@ const App: React.FC = () => {
       setIsRegistering(false);
   }
 
-  // 1. Placement Test Flow
-  if (role === UserRole.STUDENT && currentStudent && isTakingPlacementTest) {
-      return (
-          <PlacementTestView 
-            student={currentStudent}
-            onComplete={handlePlacementComplete}
-          />
-      );
-  }
-
-  // 2. Activity View (Game Loop)
+  // 1. Activity View (Game Loop)
   if (role === UserRole.STUDENT && currentStudent && activeModule) {
     return (
       <ActivityView 
@@ -160,7 +204,7 @@ const App: React.FC = () => {
     );
   }
 
-  // 3. Student Portal
+  // 2. Student Portal
   if (role === UserRole.STUDENT && currentStudent) {
     return (
       <StudentPortal 
@@ -171,12 +215,11 @@ const App: React.FC = () => {
             setRole(null);
             setCurrentStudent(null);
         }}
-        onStartPlacement={() => setIsTakingPlacementTest(true)}
       />
     );
   }
 
-  // 4. Teacher Dashboard
+  // 3. Teacher Dashboard
   if (role === UserRole.TEACHER && currentTeacher) {
     return (
       <TeacherDashboard 
@@ -191,7 +234,7 @@ const App: React.FC = () => {
     );
   }
 
-  // 5. Modern Landing / Login Screen
+  // 4. Modern Landing / Login Screen
   return (
     <div className="min-h-screen bg-slate-50 relative overflow-hidden font-sans">
         {/* Abstract Background Shapes */}
@@ -315,6 +358,17 @@ const App: React.FC = () => {
                                         <h2 className="text-2xl font-bold font-display text-slate-800">{isRegistering ? 'Teacher Sign Up' : 'Teacher Login'}</h2>
                                         <p className="text-slate-500 text-sm">{isRegistering ? 'Create your classroom account' : 'Welcome back, educator'}</p>
                                     </div>
+                                </div>
+
+                                {/* GOOGLE SIGN IN BUTTON */}
+                                <div className="mb-6">
+                                    <div id="googleButton" className="w-full min-h-[44px]"></div>
+                                </div>
+
+                                <div className="flex items-center gap-4 mb-6">
+                                    <div className="h-[1px] bg-slate-200 flex-1"></div>
+                                    <span className="text-xs font-bold text-slate-400">OR EMAIL</span>
+                                    <div className="h-[1px] bg-slate-200 flex-1"></div>
                                 </div>
 
                                 <div className="space-y-4">

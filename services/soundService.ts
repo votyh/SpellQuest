@@ -84,36 +84,47 @@ export const speakText = (text: string) => {
         }
         
         const utterance = new SpeechSynthesisUtterance(text);
+        const normalize = (lang: string) => lang.replace('_', '-');
         
-        // Robust voice selection logic
-        const preferredLocales = ['en-NZ', 'en-AU', 'en-GB', 'en-UK', 'en-US'];
+        // Robust Priority List for Kiwi/Aussie Context
         let selectedVoice = null;
 
-        // 1. Try matching by Locale Code
-        for (const locale of preferredLocales) {
-            selectedVoice = voices.find(v => {
-                const lang = v.lang.replace('_', '-'); 
-                return lang === locale || lang.startsWith(locale);
-            });
-            if (selectedVoice) break;
+        // 1. Explicit NZ Locale (e.g. 'en-NZ')
+        selectedVoice = voices.find(v => normalize(v.lang) === 'en-NZ');
+        
+        // 2. Name contains 'New Zealand' or 'NZ' (Handles voices with generic 'en' tags but specific names)
+        if (!selectedVoice) {
+            selectedVoice = voices.find(v => v.name.includes('New Zealand') || v.name.includes('NZ'));
         }
 
-        // 2. Fallback: Try matching by Name (helpful if lang codes are generic 'en')
-        // We prioritize finding a voice that explicitly says "New Zealand" or "Australia"
-        if (!selectedVoice || selectedVoice.lang.startsWith('en-US')) {
-             const nzVoice = voices.find(v => v.name.includes('New Zealand') || v.name.includes('NZ'));
-             const auVoice = voices.find(v => v.name.includes('Australia') || v.name.includes('AU'));
-             
-             if (nzVoice) selectedVoice = nzVoice;
-             else if (auVoice) selectedVoice = auVoice;
+        // 3. Fallback to Australia (Closest accent to NZ) - Locale Check
+        if (!selectedVoice) {
+            selectedVoice = voices.find(v => normalize(v.lang) === 'en-AU');
+        }
+
+        // 4. Fallback to Australia - Name Check
+        if (!selectedVoice) {
+            selectedVoice = voices.find(v => v.name.includes('Australia') || v.name.includes('AU'));
+        }
+
+        // 5. Fallback to UK (Better for NZ spelling rules than US)
+        if (!selectedVoice) {
+            selectedVoice = voices.find(v => normalize(v.lang) === 'en-GB' || v.name.includes('Great Britain') || v.name.includes('UK'));
+        }
+
+        // 6. Generic English fallback
+        if (!selectedVoice) {
+            selectedVoice = voices.find(v => v.lang.startsWith('en'));
         }
 
         if (selectedVoice) {
             utterance.voice = selectedVoice;
         }
 
-        utterance.rate = 0.9; // Slightly slower for clarity
-        utterance.pitch = 1;
+        // Settings for clarity
+        utterance.rate = 0.85; // Slightly slower to ensure students catch the sounds
+        utterance.pitch = 1.0; // Neutral pitch is usually clearest
+        utterance.volume = 1.0;
         
         window.speechSynthesis.cancel(); // Stop any previous speech
         window.speechSynthesis.speak(utterance);

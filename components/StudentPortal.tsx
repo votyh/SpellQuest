@@ -1,46 +1,56 @@
+
 import React, { useState, useEffect } from 'react';
 import { Student, ModuleTheme, ModuleProgress, LearningModule } from '../types';
-import { getAllModules, getClassmates, updateStudent } from '../services/mockStore';
+import { getAllModules, getClassmates, updateStudent, getStudents, subscribeToStore } from '../services/mockStore';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Star, Lock, Play, CheckCircle, Award, Flame, Zap, Crown, Map, RefreshCcw, Rocket, Mountain, Trees, Droplets, Save, X, Settings, Gift, BookOpen, Target, GraduationCap, ShoppingBag } from 'lucide-react';
+import { Star, Lock, Play, CheckCircle, Award, Flame, Zap, Crown, Map, RefreshCcw, Rocket, Mountain, Trees, Droplets, Save, X, Settings, Gift, BookOpen, Target, GraduationCap, ShoppingBag, Sparkles, Mic } from 'lucide-react';
 import NestView from './NestView';
+import ReadingRoom from './ReadingRoom';
 
 interface Props {
   student: Student;
   onSelectModule: (moduleId: string) => void;
   onLogout: () => void;
-  onStartPlacement: () => void;
 }
 
 const AVATAR_OPTIONS = ['🐣', '🐶', '🐱', '🐼', '🐨', '🦁', '🐸', '🦄', '🤖', '👽', '👻', '🧙‍♂️', '👸', '🦸', '🥷', '✈️', '🚀', '🏎️', '⚽', '🏀'];
 
-const StudentPortal: React.FC<Props> = ({ student, onSelectModule, onLogout, onStartPlacement }) => {
-  const classmates = getClassmates(student.id).slice(0, 5); // Top 5
+const StudentPortal: React.FC<Props> = ({ student: initialStudent, onSelectModule, onLogout }) => {
+  // Local state to handle real-time updates from store without parent refresh
+  const [student, setStudent] = useState<Student>(initialStudent);
+  const [classmates, setClassmates] = useState(getClassmates(initialStudent.id).slice(0, 5));
+  
   const allModules = getAllModules(); // Includes custom teacher modules
   const xpProgress = (student.xp % 500) / 500 * 100;
   
   // States
-  const [showYearLevelModal, setShowYearLevelModal] = useState(!student.yearLevel);
-  const [selectedYear, setSelectedYear] = useState(4);
   const [showAllAchievements, setShowAllAchievements] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showRewards, setShowRewards] = useState(false);
-  const [showMascotIntro, setShowMascotIntro] = useState(false);
   const [showNest, setShowNest] = useState(false); // New Shop View State
+  const [showReadingRoom, setShowReadingRoom] = useState(false); // New Reading View State
 
+  // Sync with prop if parent updates
   useEffect(() => {
-    // Show Mascot Intro if placement test is not started
-    if (student.placementTestStatus === 'NOT_STARTED') {
-        const timer = setTimeout(() => setShowMascotIntro(true), 500);
-        return () => clearTimeout(timer);
-    }
-  }, [student.placementTestStatus]);
+      setStudent(initialStudent);
+  }, [initialStudent]);
 
-  const handleSaveYearLevel = () => {
-      const updated = { ...student, yearLevel: selectedYear };
-      updateStudent(updated);
-      setShowYearLevelModal(false);
-  };
+  // Unified Sync Listener using Helper
+  useEffect(() => {
+    const refreshData = () => {
+        const students = getStudents();
+        const updatedSelf = students.find(s => s.id === student.id);
+        if (updatedSelf) {
+            setStudent(updatedSelf);
+            setClassmates(getClassmates(updatedSelf.id).slice(0, 5));
+        }
+    };
+    
+    // Initial fetch to be safe
+    refreshData();
+
+    return subscribeToStore(refreshData);
+  }, [student.id]);
 
   const handleUpdateAvatar = (emoji: string) => {
       updateStudent({ ...student, avatar: emoji });
@@ -96,79 +106,15 @@ const StudentPortal: React.FC<Props> = ({ student, onSelectModule, onLogout, onS
   if (showNest) {
       return <NestView student={student} onClose={() => setShowNest(false)} />;
   }
+  
+  // Render Reading Room
+  if (showReadingRoom) {
+      return <ReadingRoom student={student} onExit={() => setShowReadingRoom(false)} />;
+  }
 
   return (
     <div className="min-h-screen bg-slate-50 font-sans pb-20 relative">
       
-      {/* YEAR LEVEL MODAL */}
-      <AnimatePresence>
-        {showYearLevelModal && !showMascotIntro && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
-                <motion.div initial={{scale: 0.9, opacity: 0}} animate={{scale: 1, opacity: 1}} className="bg-white rounded-2xl p-8 max-w-md w-full shadow-2xl">
-                    <h2 className="text-2xl font-bold font-display text-center mb-4">Welcome, {student.name}! 👋</h2>
-                    <p className="text-center text-gray-500 mb-6">Before we start your adventure, what year level are you in?</p>
-                    <div className="grid grid-cols-4 gap-3 mb-8">
-                        {[1, 2, 3, 4, 5, 6, 7, 8].map(y => (
-                            <button 
-                                key={y} 
-                                onClick={() => setSelectedYear(y)}
-                                className={`py-3 rounded-xl font-bold text-lg border-2 transition-all ${selectedYear === y ? 'border-blue-500 bg-blue-50 text-blue-600' : 'border-gray-100 hover:border-blue-200'}`}
-                            >
-                                {y}
-                            </button>
-                        ))}
-                    </div>
-                    <button onClick={handleSaveYearLevel} className="w-full bg-blue-600 text-white font-bold py-4 rounded-xl shadow-lg hover:bg-blue-700">
-                        Start Adventure
-                    </button>
-                </motion.div>
-            </div>
-        )}
-      </AnimatePresence>
-
-      {/* MASCOT INTRO MODAL */}
-      <AnimatePresence>
-          {showMascotIntro && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-                <motion.div 
-                    initial={{ scale: 0.8, opacity: 0, y: 50 }}
-                    animate={{ scale: 1, opacity: 1, y: 0 }}
-                    className="bg-white rounded-3xl p-8 max-w-lg w-full shadow-2xl relative overflow-hidden"
-                >
-                    <div className="relative z-10 flex flex-col items-center text-center">
-                        <motion.div 
-                            initial={{ scale: 0, rotate: -20 }}
-                            animate={{ scale: 1, rotate: 0 }}
-                            transition={{ delay: 0.2, type: 'spring' }}
-                            className="w-28 h-28 bg-gradient-to-br from-teal-400 to-emerald-500 rounded-full flex items-center justify-center border-4 border-white shadow-xl mb-6"
-                        >
-                            <span className="text-6xl">🥝</span>
-                        </motion.div>
-
-                        <h2 className="text-3xl font-display font-bold text-slate-800 mb-2">Kia ora, I'm Tudor!</h2>
-                        <p className="text-slate-500 font-bold mb-6 text-lg">Your official Spelling Guide.</p>
-                        
-                        <div className="bg-slate-50 p-6 rounded-2xl border border-slate-100 mb-8 text-left relative">
-                            <p className="text-slate-600 leading-relaxed">
-                                "Before we start our adventure, I need to see what you already know! Let's take a quick <strong>Placement Challenge</strong> so I can pick the perfect path for you."
-                            </p>
-                        </div>
-
-                        <button 
-                            onClick={() => {
-                                setShowMascotIntro(false);
-                                onStartPlacement();
-                            }}
-                            className="w-full py-4 bg-teal-600 hover:bg-teal-700 text-white rounded-xl font-bold text-xl shadow-lg transition-transform hover:scale-105 flex items-center justify-center gap-2"
-                        >
-                            Start Challenge <Rocket size={20} />
-                        </button>
-                    </div>
-                </motion.div>
-            </div>
-          )}
-      </AnimatePresence>
-
       {/* SETTINGS MODAL */}
       <AnimatePresence>
           {showSettings && (
@@ -309,24 +255,6 @@ const StudentPortal: React.FC<Props> = ({ student, onSelectModule, onLogout, onS
         {/* LEFT COLUMN: Mission & Leaderboard */}
         <div className="lg:col-span-1 space-y-6">
             
-            {/* PLACEMENT TEST BANNER */}
-            {student.placementTestStatus === 'NOT_STARTED' && (
-                <motion.div 
-                    initial={{ scale: 0.9, opacity: 0 }}
-                    animate={{ scale: 1, opacity: 1 }}
-                    className="bg-gradient-to-br from-indigo-900 to-purple-900 rounded-3xl p-6 text-white shadow-xl shadow-indigo-200 relative overflow-hidden group cursor-pointer"
-                    onClick={onStartPlacement}
-                >
-                    <div className="flex items-center gap-4 relative z-10">
-                        <div className="bg-white/20 p-3 rounded-full"><Target size={24} /></div>
-                        <div>
-                            <h3 className="font-bold text-lg leading-tight">Start Challenge</h3>
-                            <p className="text-xs opacity-90">Find your starting level!</p>
-                        </div>
-                    </div>
-                </motion.div>
-            )}
-
             {/* NEST SHOP BANNER */}
             <motion.div 
                 whileHover={{ scale: 1.02 }}
@@ -339,6 +267,22 @@ const StudentPortal: React.FC<Props> = ({ student, onSelectModule, onLogout, onS
                     <div>
                         <h3 className="font-bold text-lg leading-tight">Tudor's Nest</h3>
                         <p className="text-xs opacity-90">Spend stars to customize!</p>
+                    </div>
+                </div>
+            </motion.div>
+
+             {/* READING ROOM BANNER */}
+             <motion.div 
+                whileHover={{ scale: 1.02 }}
+                onClick={() => setShowReadingRoom(true)}
+                className="bg-gradient-to-r from-orange-400 to-amber-500 rounded-3xl p-6 text-white shadow-lg cursor-pointer relative overflow-hidden group"
+            >
+                <div className="absolute top-0 right-0 p-4 opacity-20 text-6xl">📖</div>
+                <div className="flex items-center gap-4 relative z-10">
+                    <div className="bg-white/20 p-3 rounded-full"><Mic size={24} /></div>
+                    <div>
+                        <h3 className="font-bold text-lg leading-tight">Reading Room</h3>
+                        <p className="text-xs opacity-90">Read out loud to Tudor!</p>
                     </div>
                 </div>
             </motion.div>
@@ -390,8 +334,6 @@ const StudentPortal: React.FC<Props> = ({ student, onSelectModule, onLogout, onS
                         // Since classmates is sorted by XP DESC, check against the previous student
                         let rank = idx + 1;
                         if (idx > 0 && mate.xp === classmates[idx - 1].xp) {
-                             // Find the first student with this XP to determine the rank number
-                             // e.g. [100, 100, 90] -> Rank 1, 1, 3
                              const firstIndex = classmates.findIndex(s => s.xp === mate.xp);
                              rank = firstIndex + 1;
                         }
@@ -454,11 +396,9 @@ const StudentPortal: React.FC<Props> = ({ student, onSelectModule, onLogout, onS
             <div className="grid gap-5">
             {allModules.map((module, index) => {
                 const progress = student.progress[module.id];
-                // IMPORTANT: Custom modules don't depend on previous modules. 
-                // Only standard modules (which have fixed indices) should lock.
                 const isCustom = module.isCustom;
                 
-                // For standard modules, find the previous standard module to check lock state
+                // Logic to check if previous standard modules are done
                 let isLocked = false;
                 if (!isCustom) {
                     const prevStandardModule = allModules.slice(0, index).reverse().find(m => !m.isCustom);
@@ -468,9 +408,11 @@ const StudentPortal: React.FC<Props> = ({ student, onSelectModule, onLogout, onS
                     }
                 }
 
-                // Teacher assignments override locks
+                // Assigned & Suggested Overrides
                 const isAssigned = student.assignedModuleIds?.includes(module.id);
-                if (isAssigned) isLocked = false;
+                const isSuggested = student.suggestedModuleIds?.includes(module.id);
+                
+                if (isAssigned || isSuggested) isLocked = false;
                 
                 const styles = getThemeStyles(module.theme);
                 const isResumable = progress && !progress.completed && progress.resumeState;
@@ -483,13 +425,20 @@ const StudentPortal: React.FC<Props> = ({ student, onSelectModule, onLogout, onS
                     className={`relative rounded-[2rem] transition-all duration-300 ${isLocked ? 'opacity-80' : 'cursor-pointer hover:shadow-lg'}`}
                     onClick={() => !isLocked && onSelectModule(module.id)}
                 >
-                    <div className={`w-full bg-white rounded-[2rem] border-2 ${isLocked ? 'border-slate-100 bg-slate-50' : isAssigned ? 'border-indigo-400 ring-2 ring-indigo-200' : styles.border} p-1`}>
+                    <div className={`w-full bg-white rounded-[2rem] border-2 ${isLocked ? 'border-slate-100 bg-slate-50' : isAssigned ? 'border-indigo-400 ring-2 ring-indigo-200' : isSuggested ? 'border-green-400 ring-2 ring-green-100' : styles.border} p-1`}>
                         <div className={`rounded-[1.8rem] p-6 flex flex-col md:flex-row items-center gap-6 relative overflow-hidden ${isLocked ? 'bg-slate-50' : styles.bg}`}>
                             
                             {/* Assigned Badge */}
                             {isAssigned && (
                                 <div className="absolute top-0 right-0 bg-indigo-500 text-white text-[10px] font-bold px-3 py-1 rounded-bl-xl z-20 flex items-center gap-1">
                                     <BookOpen size={10} /> ASSIGNED
+                                </div>
+                            )}
+
+                             {/* Suggested Badge */}
+                             {!isAssigned && isSuggested && (
+                                <div className="absolute top-0 right-0 bg-green-500 text-white text-[10px] font-bold px-3 py-1 rounded-bl-xl z-20 flex items-center gap-1">
+                                    <Sparkles size={10} /> RECOMMENDED
                                 </div>
                             )}
 

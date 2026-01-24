@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { ActivityItem, ActivityType, ModuleTheme, LearningModule, Student, LessonContent, LessonPhaseState, MistakeRecord } from '../types';
 import { generateActivitiesForModule, evaluateStudentAnswer, generateLessonAnalysis } from '../services/geminiService';
@@ -187,13 +188,23 @@ const ActivityView: React.FC<Props> = ({ module, student, onComplete, onExit }) 
       recognition.start();
   }
 
+  // Improved Answer Checking Logic
+  const checkAnswer = (user: string, correct: string) => {
+      const normalize = (s: string) => s.toLowerCase().trim()
+          .replace(/\s+/g, ' ') // Collapse multiple spaces
+          .replace(/[.,!?;:]$/, ''); // Remove trailing punctuation for looser matching
+      
+      const exactMatch = user.toLowerCase().trim() === correct.toLowerCase().trim();
+      const looseMatch = normalize(user) === normalize(correct);
+      
+      return exactMatch || looseMatch;
+  };
+
   const handlePracticeCheck = () => {
     if (!lessonContent) return;
     const current = lessonContent.practice[subIndex];
-    const uAnswer = userAnswer.toLowerCase().trim();
-    const cAnswer = current.correctAnswer.toLowerCase().trim();
-
-    if (uAnswer === cAnswer) {
+    
+    if (checkAnswer(userAnswer, current.correctAnswer)) {
         setFeedback('correct');
         setFeedbackTitle('Spot on!');
         playCorrectSound();
@@ -201,8 +212,8 @@ const ActivityView: React.FC<Props> = ({ module, student, onComplete, onExit }) 
         if (attemptsForCurrent === 0) {
             setFeedback('hint');
             setAttemptsForCurrent(1);
-            const dist = getEditDistance(uAnswer, cAnswer);
-            const threshold = cAnswer.length <= 4 ? 1 : 2;
+            const dist = getEditDistance(userAnswer.toLowerCase().trim(), current.correctAnswer.toLowerCase().trim());
+            const threshold = current.correctAnswer.length <= 4 ? 1 : 2;
             setFeedbackTitle(dist <= threshold && dist > 0 ? 'Almost Correct!' : 'Not quite right');
             playTryAgainSound();
         } else {
@@ -256,9 +267,7 @@ const ActivityView: React.FC<Props> = ({ module, student, onComplete, onExit }) 
   const handleQuizCheck = () => {
       if (!lessonContent) return;
       const current = lessonContent.quiz[subIndex];
-      const uAnswer = userAnswer.toLowerCase().trim();
-      const cAnswer = current.correctAnswer.toLowerCase().trim();
-      const isCorrect = uAnswer === cAnswer;
+      const isCorrect = checkAnswer(userAnswer, current.correctAnswer);
 
       if (isCorrect) {
           const newScore = testScore + 1;
@@ -270,8 +279,8 @@ const ActivityView: React.FC<Props> = ({ module, student, onComplete, onExit }) 
           if (attemptsForCurrent === 0) {
             setFeedback('hint');
             setAttemptsForCurrent(1);
-            const dist = getEditDistance(uAnswer, cAnswer);
-            const threshold = cAnswer.length <= 4 ? 1 : 2;
+            const dist = getEditDistance(userAnswer.toLowerCase().trim(), current.correctAnswer.toLowerCase().trim());
+            const threshold = current.correctAnswer.length <= 4 ? 1 : 2;
             setFeedbackTitle(dist <= threshold && dist > 0 ? 'So close!' : 'Try again');
             playTryAgainSound();
           } else {
@@ -648,11 +657,12 @@ const ActivityView: React.FC<Props> = ({ module, student, onComplete, onExit }) 
       <Header />
       <RuleOverlay />
       
-      {/* Tudor AI Floating Assistant */}
+      {/* Tudor AI Floating Assistant - Now with HIDDEN ANSWER context for hints */}
       <TudorAI 
         moduleTitle={module.title} 
         ruleExplanation={module.ruleExplanation} 
         currentQuestion={currentActivity.prompt} 
+        correctAnswer={currentActivity.correctAnswer}
         lessonWords={uniqueLessonWords}
       />
 

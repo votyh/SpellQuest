@@ -1,7 +1,64 @@
+
 import { GoogleGenAI, Type, Schema } from "@google/genai";
-import { LessonContent, ActivityType, LearningModule, MistakeRecord } from "../types";
+import { LessonContent, ActivityType, LearningModule, MistakeRecord, DifficultWord, MisreadWord } from "../types";
 
 const genAI = new GoogleGenAI({ apiKey: process.env.API_KEY });
+
+// --- YEAR LEVEL REFERENCE DATA (CALIBRATION) ---
+const LEVEL_REFERENCES: Record<number, { focus: string, text: string }> = {
+    1: {
+        focus: "Simple sentences, concrete ideas, familiar actions",
+        text: "The dog ran across the grass. It saw a red ball and barked happily. The ball rolled into a puddle, and the dog splashed after it. The dog was wet, but it wagged its tail."
+    },
+    2: {
+        focus: "Simple sequencing, basic emotion",
+        text: "Mia walked to the park with her brother. The swing moved high and low, and the wind brushed her face. She laughed when her shoes almost touched the sky. It was her favourite part of the day."
+    },
+    3: {
+        focus: "Description, cause and effect",
+        text: "The old tree stood at the edge of the playground. Its branches stretched wide, giving shade on hot days. When the bell rang, children gathered underneath it. It felt like a quiet place in a noisy school."
+    },
+    4: {
+        focus: "Figurative language (basic), expanded sentences",
+        text: "Rain tapped gently on the window as Leo finished his homework. The sound reminded him of fingers drumming on a table. Outside, puddles grew bigger and shinier. Leo hoped the rain would stop before morning."
+    },
+    5: {
+        focus: "Stronger description, inner thought",
+        text: "The hallway felt longer than usual as Ava walked toward the office. Her heart thumped like a drum in her chest. She didn’t know what she had done wrong, but she felt nervous. When the door opened, she took a deep breath."
+    },
+    6: {
+        focus: "Mood, tension, varied sentence length",
+        text: "The forest grew quiet as the sun dipped behind the hills. Birds vanished into the trees, and the air turned cool. Sam slowed his steps. For the first time, he wondered if coming alone had been a mistake."
+    },
+    7: {
+        focus: "Metaphor, inference, stronger vocabulary",
+        text: "The classroom buzzed with energy before the debate began. Ideas bounced from desk to desk like sparks. Ella clenched her notes, knowing her turn was coming. This was no longer just an assignment — it was a test of confidence."
+    },
+    8: {
+        focus: "Character motivation, symbolism",
+        text: "The cracked trophy sat at the back of the shelf, forgotten. Once, it had meant everything to Marcus. Now, it reminded him of how much he had changed. He reached past it and closed the cupboard door."
+    },
+    9: {
+        focus: "Abstract ideas, controlled imagery",
+        text: "The town looked smaller from the hill, as if its problems could be folded away. Lila knew that wasn’t true. Distance made things seem simple, but living inside them was harder. She turned back toward the road."
+    },
+    10: {
+        focus: "Theme, implication, layered meaning",
+        text: "The announcement echoed through the hall, but no one spoke. Some students stared at the floor; others smiled too quickly. Change had arrived, whether they wanted it or not. The silence said more than words ever could."
+    },
+    11: {
+        focus: "Symbolism, authorial intent, interpretation",
+        text: "The river no longer flooded the village, yet people still feared it. Old stories clung to its banks like mist. Even progress could not erase memory. The water flowed on, indifferent to human belief."
+    },
+    12: {
+        focus: "Ambiguity, complex metaphor, tone",
+        text: "The abandoned house leaned into the wind, its windows dark and watchful. Time had stripped it of warmth but not of presence. Those who passed felt its weight without understanding why. Some places remember more than people do."
+    },
+    13: {
+        focus: "Dense language, abstraction, layered symbolism",
+        text: "The silence in the courtroom was not empty; it was burdened. Every pause carried the residue of unspoken truths. Justice, Elian realised, was less a verdict than a negotiation with memory. And memory, unlike law, never truly rested."
+    }
+};
 
 // Schema for the Main Lesson Generation
 const lessonSchema: Schema = {
@@ -72,6 +129,13 @@ const lessonSchema: Schema = {
   required: ["intro", "practice", "conceptCheck", "quiz", "conclusion"]
 };
 
+export interface PlacementQuestion {
+  question: string;
+  correctAnswer: string;
+  distractors: string[];
+  level: number;
+}
+
 // 1. Generate the Full Lesson (Standard + Custom Words)
 export const generateActivitiesForModule = async (module: LearningModule): Promise<LessonContent> => {
   const isCustom = module.isCustom && module.customWords && module.customWords.length > 0;
@@ -140,19 +204,14 @@ export const generateActivitiesForModule = async (module: LearningModule): Promi
 
     const data = JSON.parse(response.text || "{}");
     
-    // Validation: Ensure prompts are not empty and distractors exist for non-typing tasks
     const validateItems = (items: any[]) => {
         if (!items) return;
         items.forEach((p: any) => { 
             if (!p.prompt) p.prompt = "Solve this puzzle:";
-            // Force Type if missing
             if (!p.type) p.type = "BUILD_WORD";
             
-            // CRITICAL FIX: If type is MATCHING/SORTING but lacks distractors, convert to BUILD_WORD
-            // This prevents questions with only 1 option (the correct answer) from appearing.
             if ((p.type === "MATCHING" || p.type === "SORTING")) {
                 if (!p.distractors || !Array.isArray(p.distractors) || p.distractors.length === 0) {
-                     // Fallback strategy: User must type the answer since we have no wrong options to show.
                      p.type = "BUILD_WORD";
                 }
             }
@@ -207,23 +266,24 @@ export const generateLessonAnalysis = async (moduleTitle: string, mistakes: Mist
 // 3. Grade the Concept Check Answer
 export const evaluateStudentAnswer = async (question: string, userAnswer: string, guidance: string): Promise<{ score: number; feedback: string }> => {
     const prompt = `
+        You are a friendly, encouraging primary school teacher (Year 1-8).
+
         Question: "${question}"
         Grading Guidance: "${guidance}"
         Student Answer: "${userAnswer}"
 
         Task: Grade the student's understanding on a scale of 1 to 5.
         
-        Rules:
-        - Target Audience: Year 1-8 Student.
-        - **BE LENIENT**: If they mention keywords (e.g. "letters", "sounds", "vowels", "consonants") or give a correct example, give at least a 3.
-        - Score 1: Irrelevant or nonsense.
-        - Score 3: Basic understanding / correct keywords.
-        - Score 5: Perfect explanation.
+        **GRADING RULES**:
+        1. **ACCURACY OVER GRAMMAR**: If the student conveys the correct *meaning* or *concept*, give a high score (4 or 5), even if their grammar or spelling is imperfect.
+        2. **IGNORE LENGTH**: Short answers (e.g. "It means x") are valid. Do not demand essay-length answers.
+        3. **SYNONYMS ARE VALID**: If they use different words to say the same thing, count it as correct.
+        4. **SCORE 1**: Only for irrelevant, nonsensical, or completely wrong answers.
         
         Output JSON:
         {
             "score": number, // 1-5
-            "feedback": "A short, encouraging sentence explaining the score."
+            "feedback": "A short, encouraging sentence explaining the score. If correct, say 'Spot on!' or similar."
         }
     `;
 
@@ -250,10 +310,14 @@ export const evaluateStudentAnswer = async (question: string, userAnswer: string
 }
 
 // 4. Tudor AI Chat
-export const askTudor = async (studentQuery: string, context: { moduleTitle: string, currentQuestion?: string, rule?: string, exampleWords?: string[] }): Promise<string> => {
+export const askTudor = async (studentQuery: string, context: { moduleTitle: string, currentQuestion?: string, correctAnswer?: string, rule?: string, exampleWords?: string[] }): Promise<string> => {
     const examplesContext = context.exampleWords && context.exampleWords.length > 0 
-        ? `- Example words in this lesson: ${context.exampleWords.join(', ')}`
+        ? `- Known words in this lesson: ${context.exampleWords.join(', ')}`
         : '';
+
+    const targetAnswerContext = context.correctAnswer 
+        ? `**HIDDEN TARGET ANSWER**: "${context.correctAnswer}" (Do NOT say this word!)` 
+        : "No specific target answer for this phase.";
 
     const prompt = `
         You are 'Tudor', a friendly, wise Kiwi bird assistant for a primary school spelling app.
@@ -261,19 +325,31 @@ export const askTudor = async (studentQuery: string, context: { moduleTitle: str
         Context:
         - Module: "${context.moduleTitle}".
         - Rule: "${context.rule}".
-        - Current Question: "${context.currentQuestion || 'General help'}".
+        - Current Question Prompt: "${context.currentQuestion || 'General help'}".
+        - ${targetAnswerContext}
         ${examplesContext}
 
         Student asks: "${studentQuery}"
 
-        Instructions:
-        - **Persona**: You are a helpful Kiwi bird teacher. Be encouraging, use emojis (🥝, ✨, 📚), and occasional NZ slang (e.g., "Kia ora", "Sweet as", "Good on ya").
-        - **Visuals**: Use spacing, bullet points, and text formatting to make explanations clear.
-        - **Phonetics**: When explaining a word, visually break it down (e.g., "B - EA - CH" or "PH - O - N - I - CS").
-        - **Context**: If the student asks about a specific word from the lesson (listed above), explain it using the rule.
-        - **Goal**: Help them learn *how* to spell. Do not just give the answer unless they are completely stuck after a hint.
-        - **Length**: Keep responses short (max 3 sentences) unless explaining a concept with a list.
-        - If they ask "What is the answer?", say "I can't give you the answer, but remember the rule: ${context.rule}" or give a strong hint.
+        **CRITICAL INSTRUCTIONS (SCAFFOLDING MODE):**
+        1. **NEVER GIVE THE ANSWER**: You are forbidden from spelling out or saying the "Hidden Target Answer" directly.
+        2. **Strategy for Help**:
+           - If they ask "What is the answer?", REFUSE politely. Say "I can't tell you, but..."
+           - **Rhyme Strategy**: Give them a word that rhymes (e.g., "It rhymes with 'Cat'").
+           - **Pattern Strategy**: Give them a *different* word that follows the same rule (e.g., "Think of how we spell 'Light'. This word works the same way!").
+           - **Definition Strategy**: Describe the word's meaning (e.g., "It's an animal that barks").
+           - **First Letter**: You can give the first letter ONLY if they are really stuck.
+        
+        **Persona Guidelines:**
+        - Be encouraging and use emojis (🥝, ✨, 📚).
+        - Use occasional NZ slang (e.g., "Kia ora", "Sweet as", "Good on ya").
+        - Keep responses short (max 2-3 sentences).
+        - Format clearly.
+
+        Example Interaction:
+        Target: "Night"
+        Student: "How do I spell it?"
+        Tudor: "I can't spell it for you, but I can help! 🥝 It rhymes with 'Bright' and uses the 'igh' pattern. Try sounding it out: N - IGHT."
     `;
 
     try {
@@ -287,34 +363,24 @@ export const askTudor = async (studentQuery: string, context: { moduleTitle: str
     }
 };
 
-// 5. Placement Test Services
-export interface PlacementQuestion {
-    id: string;
-    level: number;
-    question: string;
-    correctAnswer: string;
-    distractors: string[]; // For multiple choice to make it easy to grade automatically without typing ambiguity
-}
-
+// 5. Generate Placement Test
 export const generatePlacementTest = async (): Promise<PlacementQuestion[]> => {
     const prompt = `
-        Generate a comprehensive 20-question diagnostic spelling test for a primary school student (New Zealand Curriculum).
+        Generate a spelling placement test for a primary school student (Year 1-8).
+        Create 10 multiple choice questions, ranging from very easy (Level 1) to difficult (Level 5).
         
-        CRITICAL INSTRUCTIONS:
-        1. You MUST generate exactly 20 items.
-        2. **RULE APPLICATION**: Do not just ask to spell a word. Include questions that test RULES (e.g., "Which suffix should we use?", "Why do we double the 't' in 'sitting'?").
-        3. **NO AMBIGUITY**: There must be EXACTLY one correct answer. 
-        4. **NO SELF-REFERENCE**: Do NOT use the answer word in the question text (e.g., Do NOT say "What rhymes with 'Den'?" if the answer is 'Den'). Instead say "Name the home of a lion".
-        5. 'distractors' MUST contain 3 incorrect spellings that look phonetically plausible.
+        Output JSON format:
+        [
+            {
+                "question": "Which word is spelled correctly?",
+                "correctAnswer": "Because",
+                "distractors": ["Becoz", "Becuase", "Beceuse"],
+                "level": 1
+            },
+            ...
+        ]
         
-        Structure:
-        - Questions 1-4: Level 1 (Simple CVC, initial sounds).
-        - Questions 5-8: Level 2 (Blends, digraphs, magic E).
-        - Questions 9-12: Level 3 (Vowel teams, soft c/g, r-controlled).
-        - Questions 13-16: Level 4 (Prefixes/Suffixes, silent letters).
-        - Questions 17-20: Level 5 (Academic vocab, complex roots).
-        
-        Output JSON Array of objects with: id, level (1-5), question, correctAnswer, distractors.
+        Ensure a good mix of phonics, irregular words, and morphological rules.
     `;
 
     try {
@@ -328,76 +394,55 @@ export const generatePlacementTest = async (): Promise<PlacementQuestion[]> => {
                     items: {
                         type: Type.OBJECT,
                         properties: {
-                            id: { type: Type.STRING },
-                            level: { type: Type.INTEGER },
                             question: { type: Type.STRING },
                             correctAnswer: { type: Type.STRING },
-                            distractors: { type: Type.ARRAY, items: { type: Type.STRING } }
+                            distractors: { type: Type.ARRAY, items: { type: Type.STRING } },
+                            level: { type: Type.INTEGER }
                         },
-                        required: ["id", "level", "question", "correctAnswer", "distractors"]
+                        required: ["question", "correctAnswer", "distractors", "level"]
                     }
                 }
             }
         });
-        
-        const data = JSON.parse(response.text || "[]");
-        if (!Array.isArray(data) || data.length === 0) {
-            throw new Error("Empty question list generated");
-        }
-        
-        // Sanitize data to ensure questions have text
-        return data.map((q: any) => {
-            const text = q.question || q.Question || q.prompt || q.Prompt || "Select the correct spelling:";
-            return {
-                ...q,
-                question: (text && text.trim().length > 0) ? text : "Select the correct spelling:",
-                distractors: q.distractors || []
-            };
-        });
-
+        return JSON.parse(response.text || "[]");
     } catch (e) {
-        console.error("Placement Gen Error", e);
-        // Fallback with representative questions across levels
+        console.error("Failed to generate placement test", e);
+        // Fallback questions if AI fails
         return [
-            { id: 'q1', level: 1, question: "Which word is spelled correctly?", correctAnswer: "cat", distractors: ["kat", "caat", "katt"] },
-            { id: 'q2', level: 1, question: "Select the correct word: The pig is ___.", correctAnswer: "big", distractors: ["bigg", "beg", "bip"] },
-            { id: 'q3', level: 1, question: "Select the correct word: I ___ on the chair.", correctAnswer: "sat", distractors: ["satt", "set", "sap"] },
-            { id: 'q4', level: 1, question: "Which starts with P?", correctAnswer: "pin", distractors: ["bin", "din", "tin"] },
-            { id: 'q5', level: 2, question: "Select the correct word: The ___ sails on the sea.", correctAnswer: "ship", distractors: ["shipp", "chip", "sip"] },
-            { id: 'q6', level: 2, question: "Which word has a magic E?", correctAnswer: "hope", distractors: ["hop", "hopp", "hupe"] },
-            { id: 'q7', level: 2, question: "Select the correct word: She has a ___ on her face.", correctAnswer: "chin", distractors: ["shin", "kin", "chen"] },
-            { id: 'q8', level: 2, question: "Spell the animal:", correctAnswer: "frog", distractors: ["frock", "fog", "frug"] },
-            { id: 'q9', level: 3, question: "Choose the right spelling:", correctAnswer: "train", distractors: ["trane", "trayn", "traen"] },
-            { id: 'q10', level: 3, question: "Select the correct word:", correctAnswer: "circle", distractors: ["sircle", "sercle", "circl"] },
-            { id: 'q11', level: 3, question: "Which word is an animal?", correctAnswer: "bird", distractors: ["burd", "berd", "bord"] },
-            { id: 'q12', level: 3, question: "Select the correct word: The ___ was sweet.", correctAnswer: "cake", distractors: ["cak", "kaik", "cayk"] },
-            { id: 'q13', level: 4, question: "Which is correct?", correctAnswer: "running", distractors: ["runing", "runeing", "runnig"] },
-            { id: 'q14', level: 4, question: "Select the word with a prefix:", correctAnswer: "replay", distractors: ["play", "player", "playing"] },
-            { id: 'q15', level: 4, question: "Past tense of stop:", correctAnswer: "stopped", distractors: ["stoped", "stopt", "stopd"] },
-            { id: 'q16', level: 4, question: "Silent letter word:", correctAnswer: "knight", distractors: ["night", "nite", "kight"] },
-            { id: 'q17', level: 5, question: "Select the correct academic word:", correctAnswer: "analyse", distractors: ["analize", "anulise", "analise"] },
-            { id: 'q18', level: 5, question: "Which word ends correctly?", correctAnswer: "expansion", distractors: ["expantion", "expancion", "expanzion"] },
-            { id: 'q19', level: 5, question: "Scientific term:", correctAnswer: "photo", distractors: ["foto", "fowto", "poto"] },
-            { id: 'q20', level: 5, question: "Correct spelling:", correctAnswer: "muscle", distractors: ["mussel", "musle", "muscel"] }
+            { question: "Select the correct spelling.", correctAnswer: "Cat", distractors: ["Kat", "Catt", "Caat"], level: 1 },
+            { question: "Select the correct spelling.", correctAnswer: "Happy", distractors: ["Hapy", "Happee", "Hapey"], level: 2 },
+            { question: "Select the correct spelling.", correctAnswer: "Because", distractors: ["Becoz", "Becuase", "Beceuse"], level: 3 },
+            { question: "Select the correct spelling.", correctAnswer: "Necessary", distractors: ["Neccessary", "Necesary", "Nesessary"], level: 4 },
+            { question: "Select the correct spelling.", correctAnswer: "Accommodation", distractors: ["Acommodation", "Accomodation", "Acomodation"], level: 5 },
         ];
     }
 }
 
+// 6. Analyze Placement Results
 export const analyzePlacementTest = async (results: {question: PlacementQuestion, isCorrect: boolean}[]): Promise<{level: number, analysis: string}> => {
+    const correctCount = results.filter(r => r.isCorrect).length;
+    const total = results.length;
+    
+    const mistakes = results.filter(r => !r.isCorrect).map(r => 
+        `Level ${r.question.level} Question: "${r.question.question}". Target: "${r.question.correctAnswer}".`
+    ).join('\n');
+
     const prompt = `
-        Analyze these diagnostic test results to assign a New Zealand Curriculum spelling level (1-5).
+        A student took a spelling placement test.
+        Score: ${correctCount}/${total}.
         
-        Results:
-        ${results.map(r => `Level ${r.question.level} Question: ${r.isCorrect ? "CORRECT" : "WRONG"}`).join('\n')}
+        Mistakes made:
+        ${mistakes || "None. Perfect score."}
+
+        Task:
+        1. Determine the appropriate starting Level (1-5) based on where they started failing.
+        2. Write a short, encouraging analysis for the student (max 2 sentences).
         
-        Rules:
-        - Analyze performance across the 5 levels.
-        - **BE GENEROUS WITH PLACEMENT**: If a student gets most Level 1 and 2 questions right, place them in Level 3.
-        - If they get most Level 3 right, place them in Level 4.
-        - Only place in Level 1 if they failed basic Level 1/2 questions.
-        - Provide a short, encouraging analysis sentence for the teacher.
-        
-        Output JSON: { level: number, analysis: string }
+        Output JSON:
+        {
+            "level": number,
+            "analysis": "string"
+        }
     `;
 
     try {
@@ -416,12 +461,165 @@ export const analyzePlacementTest = async (results: {question: PlacementQuestion
                 }
             }
         });
-        return JSON.parse(response.text || '{"level": 1, "analysis": "Let\'s start from the beginning to build confidence."}');
+        return JSON.parse(response.text || '{"level": 1, "analysis": "Let\'s start at the beginning!"}');
     } catch (e) {
-        return { level: 1, analysis: "Placement analysis unavailable. Starting at Level 1." };
+        return { level: 1, analysis: "Good effort! Let's start from Level 1 and build up." };
     }
 }
 
+// 7. Generate Reading Passage (ENHANCED with Calibrated Examples)
+export const generateReadingPassage = async (level: number, theme: string = 'General'): Promise<{ title: string, content: string }> => {
+    
+    // Fallback to closest available level if user is out of range (though UI clamps at 1-13)
+    const effectiveLevel = Math.max(1, Math.min(13, level));
+    const reference = LEVEL_REFERENCES[effectiveLevel] || LEVEL_REFERENCES[4];
+
+    const prompt = `
+        You are an expert educational writer for New Zealand schools.
+        
+        **TASK**: Write a **complete short story** (approx 100-250 words) appropriate for a **Year ${effectiveLevel}** student.
+        
+        **THEME**: ${theme === 'General' ? 'Mystery or Adventure in New Zealand' : theme}
+
+        **STYLE & COMPLEXITY GUIDE**:
+        You MUST mimic the sentence structure, vocabulary difficulty, and tone of the following reference snippet, but expand it into a full narrative.
+        
+        *Reference Snippet*: "${reference.text}"
+        *Focus Area*: ${reference.focus}
+
+        **INSTRUCTIONS**:
+        1. The story must be significantly longer than the snippet (at least 100 words).
+        2. Use New Zealand English spelling (e.g. colour, mum, realised).
+        3. Ensure the reading level matches the reference exactly. Do not make it too hard or too easy.
+        
+        Output JSON:
+        {
+            "title": "Creative Title",
+            "content": "Full story content..."
+        }
+    `;
+
+    try {
+        const response = await genAI.models.generateContent({
+            model: "gemini-2.5-flash",
+            contents: prompt,
+            config: {
+                responseMimeType: "application/json",
+                responseSchema: {
+                    type: Type.OBJECT,
+                    properties: {
+                        title: { type: Type.STRING },
+                        content: { type: Type.STRING }
+                    },
+                    required: ["title", "content"]
+                }
+            }
+        });
+        return JSON.parse(response.text || '{"title": "The Kiwi", "content": "The kiwi bird is awake at night."}');
+    } catch (e) {
+        return { title: "The Forest", content: "Tudor the Kiwi walked through the green forest. He was looking for bugs to eat." };
+    }
+}
+
+// 8. Analyze Reading Log (UPDATED FOR MULTIMODAL AUDIO INPUT)
+export const analyzeReadingLog = async (
+    audioBase64: string, 
+    mimeType: string,
+    studentYearLevel: number, 
+    targetText?: string
+): Promise<{difficultWords: DifficultWord[], misreadWords: MisreadWord[], feedback: string, assessedLevel: string}> => {
+    
+    const audioPart = {
+        inlineData: {
+            mimeType: mimeType,
+            data: audioBase64
+        }
+    };
+
+    const promptText = `
+        You are an expert New Zealand Literacy Specialist (Tudor).
+        Please listen to the attached audio of a student reading.
+        
+        **Context:**
+        - Student Year Level: Year ${studentYearLevel}
+        ${targetText ? `- Target Text they are trying to read: "${targetText}"` : '- Student is Free Reading (no target text provided, so judge based on vocabulary used).'}
+
+        **Your Assessment Tasks:**
+        1. **Listen & Transcribe Internally:** Listen carefully to what was actually said.
+        2. **Evaluate Accuracy:** Compare it to the target text. 
+           - **CRITICAL:** Do NOT penalize for minor accent variations (Kiwi accent) or self-corrections if they get it right eventually.
+           - **CRITICAL:** Do NOT drop the reading level for 1 or 2 mistakes. If they read a Level 5 text with >90% accuracy, they are "Fluent Level 5", not "Level 3".
+        3. **Evaluate Fluency:** Listen for expression, pausing at punctuation, and smooth phrasing.
+        
+        **Output Requirements:**
+        - **difficultWords**: Identify 2-3 words from the text that are complex for this level (even if they read them correctly, just highlight them as "advanced vocabulary").
+        - **misreadWords**: Only list words they genuinely struggled with or got wrong. If they were perfect, leave this empty.
+        - **feedback**: Write 2 encouraging sentences. Focus on what they did WELL (e.g. "Great expression!", "You tackled that long word perfectly").
+        - **assessedLevel**: Give a string estimate. 
+           - Use format: "[Fluency] [Level]". e.g. "Fluent Level 5", "Developing Level 4", "Early Level 5".
+           - **ACCURACY RULE:** If the Target Text was Level X, and they made <3 mistakes, the Assessed Level MUST be Level X (Fluent). Only downgrade if they struggled significantly.
+        
+        Output JSON:
+        {
+            "difficultWords": [ { "word": "example", "meaning": "definition" } ],
+            "misreadWords": [ { "word": "targetWord", "heard": "whatYouHeard" } ],
+            "feedback": "Your reading was very clear! You stumbled slightly on multi-syllable words.",
+            "assessedLevel": "Fluent Level 5"
+        }
+    `;
+
+    try {
+        const response = await genAI.models.generateContent({
+            model: "gemini-2.5-flash",
+            contents: {
+                parts: [audioPart, { text: promptText }]
+            },
+            config: {
+                responseMimeType: "application/json",
+                responseSchema: {
+                    type: Type.OBJECT,
+                    properties: {
+                        difficultWords: {
+                            type: Type.ARRAY,
+                            items: {
+                                type: Type.OBJECT,
+                                properties: {
+                                    word: { type: Type.STRING },
+                                    meaning: { type: Type.STRING }
+                                },
+                                required: ["word", "meaning"]
+                            }
+                        },
+                        misreadWords: {
+                            type: Type.ARRAY,
+                            items: {
+                                type: Type.OBJECT,
+                                properties: {
+                                    word: { type: Type.STRING },
+                                    heard: { type: Type.STRING }
+                                },
+                                required: ["word", "heard"]
+                            }
+                        },
+                        feedback: { type: Type.STRING },
+                        assessedLevel: { type: Type.STRING }
+                    },
+                    required: ["difficultWords", "misreadWords", "feedback", "assessedLevel"]
+                }
+            }
+        });
+        const result = JSON.parse(response.text || "{}");
+        return { 
+            difficultWords: result.difficultWords || [], 
+            misreadWords: result.misreadWords || [],
+            feedback: result.feedback || "Good reading!",
+            assessedLevel: result.assessedLevel || `Level ${studentYearLevel}`
+        };
+    } catch (e) {
+        console.error("Reading analysis failed", e);
+        return { difficultWords: [], misreadWords: [], feedback: "Great effort reading today! I had a little trouble hearing the file.", assessedLevel: "Level " + studentYearLevel };
+    }
+}
 
 const getFallbackLesson = (moduleId: string): LessonContent => {
   return {
